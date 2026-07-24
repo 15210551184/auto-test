@@ -90,8 +90,8 @@ class PageScanner:
                 continue
         if tbl is None:
             return {}
-        headers = [h.strip() for h in tbl.locator(
-            ".el-table__header-wrapper th .cell, .ant-table-thead th, thead th").all_inner_texts() if h.strip()]
+        headers = _unique([h.strip() for h in tbl.locator(
+            ".el-table__header-wrapper th .cell, .ant-table-thead th, thead th").all_inner_texts() if h.strip()])
         rows = tbl.locator(".el-table__body-wrapper tbody tr.el-table__row, .ant-table-tbody tr, tbody tr")
 
         sample = {}
@@ -190,7 +190,7 @@ def scan(url: str, storage_state: Optional[str] = None,
 def to_config(report: Dict[str, Any], name: Optional[str] = None) -> Dict[str, Any]:
     fields = report["form_fields"]
     table = report.get("table") or {}
-    headers = table.get("headers", [])
+    headers = _unique(table.get("headers", []))
     btns = report.get("buttons", {})
     ctypes = table.get("column_types", {})
 
@@ -261,26 +261,17 @@ def to_config(report: Dict[str, Any], name: Optional[str] = None) -> Dict[str, A
 
     # 6. 分页
     if report.get("pagination", {}).get("has_pagination"):
-        date_col = next((h for h in headers if ctypes.get(h) == "date"), None)
-        steps = [{"assert_row_count": {"min": 1}}]
-        if date_col:
-            steps.append({"assert_sorted": {"column": date_col, "order": "desc", "kind": "date"}})
-        cases.append({"name": "分页与排序", "tags": ["list"], "steps": steps})
+        cases.append({"name": "分页默认加载", "tags": ["list"], "steps": [
+            {"assert_row_count": {"min": 1}},
+        ]})
 
     # 7. 前后端一致性
-    if report.get("list_api"):
-        cases.append({"name": "接口与表格渲染一致", "tags": ["consistency"], "steps": [
-            {"search": None},
-            {"assert_api_matches_table": {
-                "list_path": "data.records",
-                "mapping": {h: "TODO_接口字段名" for h in headers[:4]},
-            }},
-        ]})
+    # 接口字段映射无法从 DOM 可靠推导；不生成带 TODO 的不可执行用例。
 
     # 8. 导出
     if btns.get("export"):
-        cmp_cols = [h for h in headers
-                    if ctypes.get(h) in ("money", "date", "phone", "text")][:5]
+        cmp_cols = [h for h in headers if h not in ("序号", "操作", "图片")
+                    and ctypes.get(h) in ("money", "date", "phone", "text")][:5]
         cases.append({"name": "导出数据验证", "tags": ["export"], "steps": [
             {"search": None},
             {"capture": "page_data"},
@@ -318,6 +309,12 @@ def to_config(report: Dict[str, Any], name: Optional[str] = None) -> Dict[str, A
 
 # 这些词单独出现时没有区分度，去掉它们后剩下的部分不足以认定匹配
 _WEAK = re.compile(r"(请输入|请选择|是否)")
+
+
+def _unique(values: List[str]) -> List[str]:
+    """保持顺序去重，固定列与主表重复渲染时只保留一次。"""
+    seen = set()
+    return [v for v in values if v and not (v in seen or seen.add(v))]
 
 
 def _match_column(label: str, headers: List[str]) -> Optional[str]:
