@@ -13,7 +13,10 @@
    git clone <你的仓库地址> autotest
    cd autotest
    cp .env.example .env
-   vi .env    # 填 AUTOTEST_USER / AUTOTEST_PASS
+   vi .env
+   # AUTOTEST_USER / AUTOTEST_PASS —— 被测系统的登录账号
+   # WEB_USER / WEB_PASS          —— 控制台自己的访问口令，务必配置，
+   #                                  不配的话任何人拿到地址都能操作
    ```
 
 也可以本地打包好 zip，用「文件」功能上传到服务器再解压，效果一样。
@@ -47,9 +50,13 @@
 
 这样对外只暴露 443，5000 端口只在 127.0.0.1 上监听即可，防火墙不用放行 5000。
 
+不管选哪种方式，打开页面浏览器都会弹出账号密码框，填 `.env` 里的 `WEB_USER`/`WEB_PASS`。
+
 ## 四、数据持久化 / 查看数据
 
-`docker-compose.yml` 里挂载的 `configs/`、`reports/`、`.env`、`auth.json` 都在宿主机的项目目录下，直接用 1Panel「**文件**」功能就能浏览、编辑、下载报告文件，不需要进容器。
+`docker-compose.yml` 里挂载的 `configs/`、`projects/`、`reports/`、`.env`、`auth.json` 都在宿主机的项目目录下，直接用 1Panel「**文件**」功能就能浏览、编辑、下载报告文件，不需要进容器。
+
+**`projects/` 这个目录尤其重要**——新建的系统、扫描出的菜单、勾选测哪些页面，都存在这里面。如果编排里漏挂载了它（比如手改过 `docker-compose.yml`），每次点「重新构建」都会把这些数据清空，页面上看起来就是"每次进来都是全新的"。确认方法：在「文件」里打开 `/opt/autotest/projects`，里面应该能看到你建过的系统目录；再进容器「终端」看 `/app/projects` 内容是不是一样，一样就说明挂载对了。
 
 ## 五、验证码场景传 auth.json
 
@@ -78,3 +85,5 @@ docker compose up -d --build
 - **容器起来了但访问 502**：反代地址端口和容器实际映射端口对不上，检查 `docker-compose.yml` 里 `ports` 是不是 `5000:5000`，反代地址是不是 `127.0.0.1:5000`。
 - **页面运行中崩溃 / Chromium 报错**：`docker-compose.yml` 里已设 `shm_size: 1gb`，如果目标页面特别重可以在编排里改大到 `2gb` 后重新构建。
 - **日志在哪看**：容器详情页「日志」标签，不用去服务器上敲 `docker logs`。
+- **浏览器一直弹密码框 / 密码框不弹**：确认 `.env` 里 `WEB_USER`/`WEB_PASS` 两个都填了（留空任意一个都会变成不校验）；改完 `.env` 要在「容器」列表里重启 `autotest` 容器才生效。
+- **打开就是一片空白，之前建的系统都不见了**：见上面「数据持久化」一节，八成是 `projects/` 卷没挂载，重建容器时把数据清空了。

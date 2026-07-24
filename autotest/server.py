@@ -11,6 +11,7 @@ import json
 import os
 import queue
 import re
+import secrets
 import subprocess
 import sys
 import threading
@@ -21,13 +22,37 @@ from pathlib import Path
 from flask import Flask, Response, jsonify, request, send_from_directory
 
 from engine import project as P
+from engine.login import load_dotenv
 
 ROOT = Path(__file__).parent.resolve()
 CONFIG_DIR = ROOT / "configs"
 REPORT_DIR = ROOT / "reports"
 PY = sys.executable
 
+load_dotenv(str(ROOT / ".env"))
+WEB_USER = os.environ.get("WEB_USER", "")
+WEB_PASS = os.environ.get("WEB_PASS", "")
+
 app = Flask(__name__, static_folder=None)
+
+
+@app.before_request
+def _require_login():
+    """
+    控制台自身的访问口令（跟被测系统的登录是两回事）。
+    没配 WEB_USER/WEB_PASS 就放行，方便本地临时跑一下；
+    部署到公网服务器必须在 .env 里配好，否则任何人打开端口就能操作。
+    """
+    if not WEB_USER or not WEB_PASS:
+        return None
+    auth = request.authorization
+    ok = (auth and secrets.compare_digest(auth.username, WEB_USER)
+          and secrets.compare_digest(auth.password, WEB_PASS))
+    if not ok:
+        return Response(
+            "需要登录", 401,
+            {"WWW-Authenticate": 'Basic realm="autotest"'})
+    return None
 
 
 # ---------- 任务状态 ----------
@@ -360,5 +385,8 @@ def index():
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
+    if not WEB_USER or not WEB_PASS:
+        print("[警告] 未在 .env 配置 WEB_USER/WEB_PASS，控制台不做身份校验，"
+              "任何能访问该端口的人都能操作，部署到公网前请务必配置。")
     print(f"控制台已启动: http://0.0.0.0:{port}")
     app.run(host="0.0.0.0", port=port, threaded=True)

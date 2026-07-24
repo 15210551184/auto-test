@@ -166,6 +166,22 @@ engine/
 密码错误时会把登录页上的真实提示读出来（如"账号或密码错误"），
 而不是笼统的登录超时。
 
+### 多个系统，账号不一样怎么办
+
+Web 控制台里每个「系统」都有自己独立的一份 `login`（存在 `projects/<系统名>/project.yaml` 里），互不影响：
+
+- **多个系统共用一套账号**：新建系统时账号/密码留空，都会读 `.env` 里共享的 `AUTOTEST_USER`/`AUTOTEST_PASS`
+- **每个系统账号不一样**：在 `.env` 里给每个系统各起一对变量名，比如：
+  ```bash
+  SYSA_USER=account_a
+  SYSA_PASS=password_a
+  SYSB_USER=account_b
+  SYSB_PASS=password_b
+  ```
+  新建系统时账号框填 `${env:SYSA_USER}`、密码框填 `${env:SYSA_PASS}`（跟 yaml 里 `${env:AUTOTEST_PASS}` 是同一套引用语法，账号密码框直接支持）
+
+**不要把真实密码直接打进网页的账号/密码框。** `project.yaml` 是会被 git 跟踪的（`.gitignore` 只忽略了 `projects/*/pages/`），如果表单里填的是明文密码，就会原样存进这个文件，跟着仓库走。只填 `${env:变量名}` 引用，真实密码就只留在服务器的 `.env` 里（已在 `.gitignore` 里，不会进 git）。
+
 ## 落地路径
 
 1. 配 `.env`，`test-login` 验证能登进去

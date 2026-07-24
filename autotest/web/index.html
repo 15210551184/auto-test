@@ -200,9 +200,11 @@ a.open:hover{text-decoration:underline}
       <div class="row"><label>登录页地址</label>
         <input type="text" id="npLogin" placeholder="http://43.114.176.231/web/login"></div>
       <div class="row two">
-        <div><label>账号</label><input type="text" id="npUser" placeholder="留空则读 .env"></div>
-        <div><label>密码</label><input type="password" id="npPass" placeholder="留空则读 .env"></div>
+        <div><label>账号</label><input type="text" id="npUser" placeholder="留空则读 .env 的 AUTOTEST_USER"></div>
+        <div><label>密码</label><input type="password" id="npPass" placeholder="留空则读 .env 的 AUTOTEST_PASS"></div>
       </div>
+      <div class="hint">多个系统账号不一样？别把真实密码直接填在这——去 <code>.env</code> 里给这个系统单独起一对变量名（如 <code>SYSA_USER</code> / <code>SYSA_PASS</code>），
+        这里账号密码框改填 <code>${env:SYSA_USER}</code> / <code>${env:SYSA_PASS}</code> 引用，密码就只留在服务器的 <code>.env</code> 里，不会明文存进这个系统的配置文件。</div>
       <div class="row"><label>登录成功的标志元素（选填）</label>
         <input type="text" id="npExpect" placeholder=".el-menu"></div>
       <div class="hint">标志元素用来判断登录态是否还有效：填一个登录后才会出现的元素，

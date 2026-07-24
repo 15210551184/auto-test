@@ -21,7 +21,10 @@ cd autotest
 
 # 2. 配置账号密码
 cp .env.example .env
-vi .env          # 填 AUTOTEST_USER / AUTOTEST_PASS
+vi .env
+# AUTOTEST_USER / AUTOTEST_PASS —— 被测系统的登录账号
+# WEB_USER / WEB_PASS          —— 控制台自己的访问口令，务必配置，
+#                                  不配的话任何人打开 5000 端口都能操作
 
 # 3. 构建并后台启动
 docker compose up -d --build
@@ -30,18 +33,25 @@ docker compose up -d --build
 docker compose logs -f autotest
 ```
 
-启动后浏览器打开 `http://服务器IP:5000` 即可使用 Web 控制台。
+启动后浏览器打开 `http://服务器IP:5000`，浏览器会弹出账号密码框，填 `WEB_USER`/`WEB_PASS` 即可进入 Web 控制台。
+
+## 登录口令
+
+`WEB_USER`/`WEB_PASS` 是控制台本身的访问口令，跟被测系统的账号是两回事。没配置的话服务端不做任何校验，启动时会在日志里打警告——**部署到公网服务器前一定要配置**，否则任何人拿到地址就能操作、看报告、跑测试。
+
+浏览器用的是标准 HTTP Basic 认证，登录一次浏览器会记住，直到关闭浏览器或清缓存。改完 `.env` 记得 `docker compose restart autotest` 才生效。
 
 ## 目录挂载说明
 
-`docker-compose.yml` 里挂载了 4 样东西，都是宿主机持久化数据，重建容器不会丢：
+`docker-compose.yml` 里挂载了几样东西，都是宿主机持久化数据，重建容器不会丢：
 
-| 宿主机路径      | 容器内路径         | 作用                           |
-|-----------------|--------------------|--------------------------------|
-| `./configs`     | `/app/configs`     | 用例配置，改了不用重新 build   |
-| `./reports`     | `/app/reports`     | 执行报告                       |
-| `./.env`        | `/app/.env`        | 账号密码（只读挂载）           |
-| `./auth.json`   | `/app/auth.json`   | 登录态缓存，容器重启不用重登   |
+| 宿主机路径      | 容器内路径         | 作用                                     |
+|-----------------|--------------------|-------------------------------------------|
+| `./configs`     | `/app/configs`     | 用例配置，改了不用重新 build             |
+| `./projects`    | `/app/projects`    | 系统/菜单/勾选状态——**漏挂载这个的话，每次 `--build` 重建容器，之前建的系统和勾选都会被清空**，因为这些数据只写在容器内部的可写层里 |
+| `./reports`     | `/app/reports`     | 执行报告                                 |
+| `./.env`        | `/app/.env`        | 账号密码 + 控制台口令（只读挂载）        |
+| `./auth.json`   | `/app/auth.json`   | 登录态缓存，容器重启不用重登             |
 
 ## 防火墙 / 安全组
 
@@ -61,6 +71,7 @@ docker build -t autotest .
 docker run -d --name autotest \
   -p 5000:5000 \
   -v $(pwd)/configs:/app/configs \
+  -v $(pwd)/projects:/app/projects \
   -v $(pwd)/reports:/app/reports \
   -v $(pwd)/.env:/app/.env:ro \
   -v $(pwd)/auth.json:/app/auth.json \
@@ -89,7 +100,7 @@ git pull
 docker compose up -d --build
 ```
 
-`configs/`、`reports/`、`.env`、`auth.json` 都在宿主机上，重新构建镜像不影响这些数据。
+`configs/`、`projects/`、`reports/`、`.env`、`auth.json` 都在宿主机上，重新构建镜像不影响这些数据（前提是都按上面的表挂载了卷，尤其别漏了 `projects/`）。
 
 ## 常用运维命令
 
