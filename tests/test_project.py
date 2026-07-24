@@ -42,3 +42,7 @@ class RemovePageTests(unittest.TestCase):
     def test_remove_unknown_page_keeps_project_unchanged(self):
         self.assertFalse(project.remove_page("测试系统", "不存在"))
         self.assertEqual(2, len(project.load_project("测试系统")["pages"]))
+
+    def test_remove_pages_removes_only_requested_pages_and_configs(self):
+        self.assertEqual(1, project.remove_pages("测试系统", ["用户管理", "不存在"]))
+        self.assertEqual(["角色管理"], [p["name"] for p in project.load_project("测试系统")["pages"]])

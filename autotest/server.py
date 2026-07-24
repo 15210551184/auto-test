@@ -420,6 +420,16 @@ def api_delete_page(d, page):
     return jsonify({"ok": True})
 
 
+@app.post("/api/projects/<d>/pages/delete")
+def api_delete_pages(d):
+    names = (request.get_json(force=True) or {}).get("names", [])
+    if not isinstance(names, list):
+        return jsonify({"ok": False, "msg": "参数格式错误"}), 400
+    deleted = P.remove_pages(d, names)
+    return jsonify({"ok": bool(deleted), "deleted": deleted,
+                    "msg": "没有可删除的页面" if not deleted else ""})
+
+
 @app.get("/reports/<path:sub>")
 def serve_report(sub):
     return send_from_directory(REPORT_DIR, sub)

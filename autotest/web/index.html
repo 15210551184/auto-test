@@ -60,8 +60,9 @@ button.danger:hover:not(:disabled){background:#fdeced}
 .btns.fill button{flex:1;min-width:104px}
 .hint{font-size:12px;color:var(--ink-3);margin-top:9px;line-height:1.5}
 .tree{max-height:490px;overflow-y:auto}
-.grp{padding:8px 15px 4px;font-size:11px;font-weight:600;letter-spacing:.06em;
+.grp{width:100%;text-align:left;padding:8px 15px 4px;font:600 11px/1.55 inherit;letter-spacing:.06em;
   color:var(--ink-3);background:#fafbfc;border-bottom:1px solid #f0f2f5;position:sticky;top:0;z-index:1}
+.grp:hover{background:#f2f5f9}.grp .chev{display:inline-block;width:16px;color:var(--ink-2)}
 .item{display:flex;align-items:center;gap:10px;padding:9px 15px;
   border-bottom:1px solid #f4f6f8;cursor:pointer}
 .item:hover{background:#f8fafc}
@@ -145,6 +146,7 @@ a.open:hover{text-decoration:underline}
           <button class="link sm" data-pick="rec">选推荐</button>
           <button class="link sm" data-pick="all">全选</button>
           <button class="link sm" data-pick="none">清空</button>
+          <button class="danger sm" id="btnDeleteSelected">删除已选</button>
         </div>
       </div>
       <div class="tree" id="tree">
@@ -224,6 +226,7 @@ a.open:hover{text-decoration:underline}
 const $ = s => document.querySelector(s);
 const term = $('#term');
 let proj = null, pages = [], everStreamed = false;
+const collapsedGroups = new Set();
 function toast(m,bad){const t=$('#toast');t.textContent=m;
   t.className='show'+(bad?' bad':'');clearTimeout(t._t);t._t=setTimeout(()=>t.className='',3200);}
 function setState(k,t){$('#globalState').className=k;$('#stateText').textContent=t;}
@@ -263,7 +266,9 @@ function renderTree(){
   pages.forEach((p,i)=>{const g=p.group||'未分组';(groups[g]=groups[g]||[]).push([p,i]);});
   let h='';
   for(const g in groups){
-    h+='<div class="grp">'+esc(g)+'</div>';
+    const folded=collapsedGroups.has(g);
+    h+='<button class="grp" type="button" data-group="'+esc(g)+'"><span class="chev">'+(folded?'▸':'▾')+'</span>'+esc(g)+'（'+groups[g].length+'）</button>';
+    if(folded) continue;
     groups[g].forEach(function(pair){
       const p=pair[0],i=pair[1],tags=[];
       if(p.has_config) tags.push('<span class="tag cfg">已生成用例</span>');
@@ -293,6 +298,10 @@ function renderTree(){
       pages.splice(+btn.dataset.del,1);renderTree();toast('已删除“'+p.name+'”及其用例');
     };
   });
+  tree.querySelectorAll('[data-group]').forEach(btn=>{
+    btn.onclick=()=>{const g=btn.dataset.group;
+      collapsedGroups.has(g)?collapsedGroups.delete(g):collapsedGroups.add(g);renderTree();};
+  });
   updateCount();
 }
 function updateCount(){
@@ -313,6 +322,13 @@ document.querySelectorAll('[data-pick]').forEach(b=>{
     pages.forEach(p=>p.selected = m==='all'?true : m==='none'?false : !!p.recommended);
     renderTree();syncSel();};
 });
+$('#btnDeleteSelected').onclick=async()=>{if(!proj)return;const selected=pages.filter(p=>p.selected);
+  if(!selected.length)return toast('请先勾选要删除的菜单',true);
+  if(!confirm('删除已选的 '+selected.length+' 个菜单吗？\n这些页面已生成的用例也会一并删除，无法恢复。'))return;
+  const r=await post('/api/projects/'+encodeURIComponent(proj.dir)+'/pages/delete',{names:selected.map(p=>p.name)});
+  if(!r.ok||!r.data.ok)return toast(r.data.msg||'批量删除失败',true);
+  pages=pages.filter(p=>!p.selected);renderTree();toast('已删除 '+r.data.deleted+' 个菜单及其用例');
+};
 
 function lineClass(s){
   if(s.indexOf('✓')>=0||/通过 \d/.test(s)) return 'l-pass';

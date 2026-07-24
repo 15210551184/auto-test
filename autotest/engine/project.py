@@ -152,6 +152,26 @@ def remove_page(dir_name: str, page_name: str) -> bool:
     return True
 
 
+def remove_pages(dir_name: str, page_names: List[str]) -> int:
+    """批量移除菜单地图页面及其生成的用例，返回实际删除数量。"""
+    data = load_project(dir_name)
+    if not data:
+        return 0
+    requested = {str(name) for name in page_names}
+    removed = [p for p in data.get("pages", []) if p.get("name") in requested]
+    if not removed:
+        return 0
+    data["pages"] = [p for p in data["pages"] if p.get("name") not in requested]
+    for item in data["pages"]:
+        item.pop("has_config", None)
+    save_project(data)
+    for item in removed:
+        config = page_config_path(dir_name, item["name"])
+        if config.is_file():
+            config.unlink()
+    return len(removed)
+
+
 def selected_pages(dir_name: str) -> List[Dict]:
     data = load_project(dir_name)
     if not data:

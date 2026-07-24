@@ -11,6 +11,7 @@
 
 所以策略是「点击 + 观察 URL 变化」，而不是解析 href。
 """
+import json
 import re
 import time
 from typing import Dict, List, Optional, Set
@@ -76,7 +77,9 @@ def _collect_visible_leaves(page: Page, leaves: List[Dict], seen: Set[str]) -> i
             if not name or key in seen or any(k in name for k in SKIP_KEYWORDS):
                 continue
             seen.add(key)
-            leaves.append({"name": name, "group": group})
+            leaves.append({"name": name, "group": group,
+                           "menu_index": item.get_attribute("index") or item.get_attribute("data-index"),
+                           "parent_indexes": _menu_indexes(item)})
             added += 1
         if added:
             break
@@ -118,8 +121,36 @@ def _collect_all_leaves(page: Page, on_progress=None) -> List[Dict]:
             _progress(on_progress, f"  跳过菜单 {name}：{type(exc).__name__}")
 
 
-def _open_menu_path(page: Page, group: str) -> None:
+def _menu_indexes(leaf) -> List[str]:
+    """读取 Element UI/Ant 菜单祖先的稳定 index 属性。"""
+    try:
+        ancestors = leaf.locator(
+            "xpath=ancestor::*[contains(@class,'el-submenu') or "
+            "contains(@class,'el-sub-menu') or contains(@class,'ant-menu-submenu')]")
+        return [idx for i in range(ancestors.count())
+                if (idx := (ancestors.nth(i).get_attribute("index") or
+                            ancestors.nth(i).get_attribute("data-index")))]
+    except Exception:
+        return []
+
+
+def _open_menu_path(page: Page, group: str, parent_indexes: Optional[List[str]] = None) -> None:
     """在重新加载首页后按层级重新展开目标叶子所在的分支。"""
+    if parent_indexes:
+        opened = 0
+        for index in parent_indexes:
+            owner = page.locator(f"[index={json.dumps(index)}], [data-index={json.dumps(index)}]")
+            title = owner.locator(",".join(SUBMENU_SELECTORS)).first
+            try:
+                if title.count() and title.is_visible():
+                    title.click(timeout=3000)
+                    page.wait_for_timeout(220)
+                    opened += 1
+                    continue
+            except Exception:
+                pass
+        if opened == len(parent_indexes):
+            return
     for name in filter(None, group.split(" / ")):
         title = page.locator(",".join(SUBMENU_SELECTORS)).filter(
             has_text=re.compile(rf"^\s*{re.escape(name)}\s*$"))
@@ -180,11 +211,12 @@ def crawl_menu(page: Page, home_url: str, max_pages: int = 60,
         try:
             page.goto(home_url, wait_until="domcontentloaded", timeout=30000)
             page.wait_for_timeout(900)
-            _open_menu_path(page, leaf["group"])
+            _open_menu_path(page, leaf["group"], leaf.get("parent_indexes"))
 
-            target = page.locator(
-                f"{','.join(LEAF_SELECTORS)}"
-            ).filter(has_text=re.compile(rf"^\s*{re.escape(name)}\s*$"))
+            target = page.locator(f"[index={json.dumps(leaf['menu_index'])}], "
+                                  f"[data-index={json.dumps(leaf['menu_index'])}]") \
+                if leaf.get("menu_index") else page.locator(f"{','.join(LEAF_SELECTORS)}").filter(
+                    has_text=re.compile(rf"^\s*{re.escape(name)}\s*$"))
             if target.count() == 0:
                 target = page.get_by_text(name, exact=True)
             if target.count() == 0:
