@@ -42,6 +42,7 @@ label{display:block;font-size:12px;color:var(--ink-2);margin:0 0 5px}
 select,input[type=text],input[type=password]{width:100%;padding:8px 10px;border:1px solid var(--line);
   border-radius:5px;font-size:13px;background:#fff;color:var(--ink);font-family:inherit}
 select:focus,input:focus{outline:2px solid #b9cdf6;outline-offset:-1px;border-color:var(--busy)}
+textarea{width:100%;min-height:430px;padding:10px;border:1px solid var(--line);border-radius:5px;font:12px/1.55 ui-monospace,SFMono-Regular,Menlo,monospace;resize:vertical}
 .row{margin-bottom:12px}.row:last-child{margin-bottom:0}
 .two{display:grid;grid-template-columns:1fr 1fr;gap:10px}
 button{font:500 13px/1 inherit;padding:9px 14px;border-radius:5px;cursor:pointer;
@@ -222,6 +223,7 @@ a.open:hover{text-decoration:underline}
   </div>
 </div>
 <div id="toast"></div>
+<div class="mask" id="yamlMask"><div class="modal" style="width:860px"><h3 id="yamlTitle">编辑 YAML</h3><div class="body"><textarea id="yamlText" spellcheck="false"></textarea></div><div class="foot"><button id="yamlCancel">取消</button><button class="primary" id="yamlSave">保存</button></div></div></div>
 <script>
 const $ = s => document.querySelector(s);
 const term = $('#term');
@@ -267,7 +269,8 @@ function renderTree(){
   let h='';
   for(const g in groups){
     const folded=collapsedGroups.has(g);
-    h+='<button class="grp" type="button" data-group="'+esc(g)+'"><span class="chev">'+(folded?'▸':'▾')+'</span>'+esc(g)+'（'+groups[g].length+'）</button>';
+    const selected=groups[g].filter(x=>x[0].selected).length;
+    h+='<button class="grp" type="button" data-group="'+esc(g)+'"><input class="grp-check" type="checkbox" data-group-check="'+esc(g)+'" '+(selected===groups[g].length?'checked':'')+'><span class="chev">'+(folded?'▸':'▾')+'</span>'+esc(g)+'（'+groups[g].length+'）</button>';
     if(folded) continue;
     groups[g].forEach(function(pair){
       const p=pair[0],i=pair[1],tags=[];
@@ -280,13 +283,19 @@ function renderTree(){
       h+='<label class="item '+(p.selected?'':'off')+'">'+
          '<input type="checkbox" data-i="'+i+'" '+(p.selected?'checked':'')+'>'+
          '<span class="nm">'+esc(p.name)+'</span>'+
-         '<span class="tags">'+tags.join('')+'<button class="danger sm" type="button" data-del="'+i+'">删除</button></span></label>';
+         '<span class="tags">'+tags.join('')+(p.has_config?'<button class="link sm" type="button" data-yaml="'+i+'">编辑 YAML</button>':'')+'<button class="danger sm" type="button" data-del="'+i+'">删除</button></span></label>';
     });
   }
   tree.innerHTML=h;
   tree.querySelectorAll('input[type=checkbox]').forEach(cb=>{
+    if(cb.dataset.groupCheck)return;
     cb.onchange=()=>{pages[+cb.dataset.i].selected=cb.checked;
       cb.closest('.item').classList.toggle('off',!cb.checked);syncSel();};
+  });
+  tree.querySelectorAll('[data-group-check]').forEach(cb=>{
+    const group=cb.dataset.groupCheck, members=groups[group]||[], n=members.filter(x=>x[0].selected).length;
+    cb.indeterminate=n>0&&n<members.length;
+    cb.onclick=e=>{e.stopPropagation();members.forEach(x=>x[0].selected=cb.checked);renderTree();syncSel();};
   });
   tree.querySelectorAll('[data-del]').forEach(btn=>{
     btn.onclick=async e=>{e.preventDefault();e.stopPropagation();
@@ -299,9 +308,10 @@ function renderTree(){
     };
   });
   tree.querySelectorAll('[data-group]').forEach(btn=>{
-    btn.onclick=()=>{const g=btn.dataset.group;
+    btn.onclick=e=>{if(e.target.matches('input'))return;const g=btn.dataset.group;
       collapsedGroups.has(g)?collapsedGroups.delete(g):collapsedGroups.add(g);renderTree();};
   });
+  tree.querySelectorAll('[data-yaml]').forEach(btn=>{btn.onclick=async e=>{e.preventDefault();e.stopPropagation();const p=pages[+btn.dataset.yaml],r=await get('/api/projects/'+encodeURIComponent(proj.dir)+'/pages/'+encodeURIComponent(p.name)+'/config');if(!r.ok)return toast(r.msg||'读取 YAML 失败',true);$('#yamlTitle').textContent='编辑 YAML · '+p.name;$('#yamlText').value=r.content;$('#yamlMask').classList.add('show');$('#yamlMask').dataset.i=btn.dataset.yaml;};});
   updateCount();
 }
 function updateCount(){
@@ -329,6 +339,8 @@ $('#btnDeleteSelected').onclick=async()=>{if(!proj)return;const selected=pages.f
   if(!r.ok||!r.data.ok)return toast(r.data.msg||'批量删除失败',true);
   pages=pages.filter(p=>!p.selected);renderTree();toast('已删除 '+r.data.deleted+' 个菜单及其用例');
 };
+$('#yamlCancel').onclick=()=>$('#yamlMask').classList.remove('show');
+$('#yamlSave').onclick=async()=>{const i=+$('#yamlMask').dataset.i,p=pages[i];if(!p)return;const r=await post('/api/projects/'+encodeURIComponent(proj.dir)+'/pages/'+encodeURIComponent(p.name)+'/config',{content:$('#yamlText').value});if(!r.ok||!r.data.ok)return toast(r.data.msg||'保存失败',true);$('#yamlMask').classList.remove('show');p.has_config=true;renderTree();toast('YAML 已保存');};
 
 function lineClass(s){
   if(s.indexOf('✓')>=0||/通过 \d/.test(s)) return 'l-pass';

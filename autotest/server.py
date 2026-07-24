@@ -430,6 +430,30 @@ def api_delete_pages(d):
                     "msg": "没有可删除的页面" if not deleted else ""})
 
 
+@app.get("/api/projects/<d>/pages/<page>/config")
+def api_get_page_config(d, page):
+    path = P.page_config_path(d, page)
+    if not path.is_file():
+        return jsonify({"ok": False, "msg": "该页面尚未生成用例"}), 404
+    return jsonify({"ok": True, "content": path.read_text(encoding="utf-8")})
+
+
+@app.post("/api/projects/<d>/pages/<page>/config")
+def api_save_page_config(d, page):
+    if not P.load_project(d):
+        return jsonify({"ok": False, "msg": "项目不存在"}), 404
+    content = (request.get_json(force=True) or {}).get("content", "")
+    try:
+        import yaml
+        yaml.safe_load(content)
+    except Exception as exc:
+        return jsonify({"ok": False, "msg": f"YAML 语法错误: {exc}"}), 400
+    path = P.page_config_path(d, page)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(content, encoding="utf-8")
+    return jsonify({"ok": True})
+
+
 @app.get("/reports/<path:sub>")
 def serve_report(sub):
     return send_from_directory(REPORT_DIR, sub)
