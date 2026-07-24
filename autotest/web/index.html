@@ -183,10 +183,11 @@ a.open:hover{text-decoration:underline}
         </div>
         <div class="row btns fill">
           <button id="btnGen">生成用例</button>
+          <button id="btnRegen">重新生成用例</button>
           <button class="primary" id="btnRunSel">执行测试</button>
         </div>
         <div class="hint">
-          「生成用例」给勾选的页面各建一份配置，已有的不覆盖，不会冲掉你手工补的断言。
+          「生成用例」不会覆盖已有 YAML；「重新生成用例」会覆盖当前已勾选页面的 YAML。
           「执行测试」跑勾选的页面，全程只登录一次。
         </div>
       </div>
@@ -379,25 +380,26 @@ async function loadReports(){
   });
   $('#repWrap').innerHTML=h+'</tbody></table>';
 }
-async function trigger(action){
+async function trigger(action, overwrite=false){
   if(!proj) return toast('请先选择或新建一个系统',true);
   const sel=pages.filter(p=>p.selected);
   if((action==='batch-scan'||action==='batch-run')&&!sel.length)
     return toast('请先勾选要测试的菜单',true);
   if(action==='batch-run'&&!sel.some(p=>p.has_config))
     return toast('勾选的页面还没有用例，请先点「生成用例」',true);
-  const r=await post('/api/run',{action:action,project:proj.dir});
+  const r=await post('/api/run',{action:action,project:proj.dir,overwrite:overwrite});
   if(!r.ok||!r.data.ok) return toast(r.data.msg||'启动失败',true);
   term.innerHTML='';everStreamed=true;setBusy(true);
 }
 $('#btnDiscover').onclick=()=>trigger('discover');
 $('#btnGen').onclick=()=>trigger('batch-scan');
+$('#btnRegen').onclick=()=>{if(confirm('重新生成会覆盖当前已勾选页面的 YAML 手工修改，确定继续吗？'))trigger('batch-scan',true);};
 $('#btnRunSel').onclick=()=>trigger('batch-run');
 $('#btnStop').onclick=async()=>{const r=await post('/api/stop');
   toast(r.data.ok?'已发送终止信号':'当前没有运行中的任务',!r.data.ok);};
 $('#btnClear').onclick=()=>{term.innerHTML='<span class="empty">日志已清空。</span>';everStreamed=false;};
 function setBusy(b){
-  ['#btnDiscover','#btnGen','#btnRunSel','#btnNewProj'].forEach(s=>$(s).disabled=b);
+  ['#btnDiscover','#btnGen','#btnRegen','#btnRunSel','#btnNewProj'].forEach(s=>$(s).disabled=b);
   $('#btnStop').disabled=!b;
   if(b) setState('busy','执行中');
 }
