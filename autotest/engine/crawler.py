@@ -165,6 +165,54 @@ def _open_menu_path(page: Page, group: str, parent_indexes: Optional[List[str]] 
                 continue
 
 
+def _find_visible_menu_item(page: Page, name: str):
+    """在手风琴菜单中逐分支展开，返回可见的目标菜单项。"""
+    exact = re.compile(rf"^\s*{re.escape(name)}\s*$")
+
+    def find_leaf():
+        items = page.locator(",".join(LEAF_SELECTORS)).filter(has_text=exact)
+        for i in range(items.count()):
+            item = items.nth(i)
+            try:
+                if item.is_visible():
+                    return item
+            except Exception:
+                continue
+        return None
+
+    item = find_leaf()
+    if item:
+        return item
+    opened: Set[str] = set()
+    while True:
+        candidate = None
+        for selector in SUBMENU_SELECTORS:
+            titles = page.locator(selector)
+            for i in range(titles.count()):
+                title = titles.nth(i)
+                try:
+                    key = _text(title)
+                    if key and key not in opened and title.is_visible():
+                        candidate = (title, key)
+                        break
+                except Exception:
+                    continue
+            if candidate:
+                break
+        if not candidate:
+            return None
+        title, key = candidate
+        opened.add(key)
+        try:
+            title.click(timeout=3000)
+            page.wait_for_timeout(250)
+        except Exception:
+            continue
+        item = find_leaf()
+        if item:
+            return item
+
+
 def _menu_path(leaf) -> str:
     """尽量拼出「订单管理 / 订单列表」这样的层级路径"""
     try:
@@ -219,9 +267,16 @@ def crawl_menu(page: Page, home_url: str, max_pages: int = 60,
                     has_text=re.compile(rf"^\s*{re.escape(name)}\s*$"))
             if target.count() == 0:
                 target = page.get_by_text(name, exact=True)
-            if target.count() == 0:
-                _progress(on_progress, "  跳过：找不到菜单项")
-                continue
+            try:
+                target_visible = target.count() > 0 and target.first.is_visible()
+            except Exception:
+                target_visible = False
+            if not target_visible:
+                _progress(on_progress, "  路径定位失败，正在遍历菜单分支…")
+                target = _find_visible_menu_item(page, name)
+                if target is None:
+                    _progress(on_progress, "  跳过：找不到菜单项")
+                    continue
 
             before = page.url
             target.first.click(timeout=4000)
