@@ -19,6 +19,7 @@ from urllib.parse import urlparse
 
 from playwright.sync_api import Page, sync_playwright
 
+from . import browser as B
 from .login import ensure_logged_in, is_login_page
 from .state import save_storage_state, valid_storage_state
 
@@ -376,20 +377,28 @@ def crawl_menu(page: Page, home_url: str, max_pages: int = 60,
 
 def _probe_page(page: Page) -> Dict:
     """粗略判断这一页值不值得测"""
+    table = None
     try:
-        table = page.locator(".el-table, .ant-table, table.data-table")
-        has_table = table.count() > 0 and table.first.is_visible()
+        candidates = page.locator(".el-table, .ant-table, table.data-table, table")
+        for i in range(candidates.count()):
+            candidate = candidates.nth(i)
+            headers = candidate.locator(
+                ".el-table__header-wrapper th .cell, .ant-table-thead th, thead th").all_inner_texts()
+            if candidate.is_visible() and any(h.strip() for h in headers):
+                table = candidate
+                break
     except Exception:
-        has_table = False
+        table = None
+    has_table = table is not None
 
     cols, rows = 0, 0
     if has_table:
         try:
-            cols = len([t for t in table.first.locator(
-                ".el-table__header-wrapper th .cell, .ant-table-thead th"
+            cols = len([t for t in table.locator(
+                ".el-table__header-wrapper th .cell, .ant-table-thead th, thead th"
             ).all_inner_texts() if t.strip()])
-            rows = table.first.locator(
-                ".el-table__body-wrapper tbody tr.el-table__row, .ant-table-tbody tr"
+            rows = table.locator(
+                ".el-table__body-wrapper tbody tr.el-table__row, .ant-table-tbody tr, tbody tr"
             ).count()
         except Exception:
             pass
@@ -421,11 +430,8 @@ def discover(home_url: str, login_cfg: Optional[dict] = None,
              on_progress=None) -> List[Dict]:
     """对外入口：登录 → 爬菜单 → 返回页面列表"""
     with sync_playwright() as pw:
-        browser = pw.chromium.launch(
-            headless=True,
-            args=["--no-sandbox", "--disable-dev-shm-usage"])
-        args = {"viewport": {"width": 1600, "height": 900},
-                "locale": "zh-CN", "ignore_https_errors": True}
+        browser = B.launch(pw, headless=True)
+        args = B.context_args()
         state = valid_storage_state(storage_state, on_progress)
         if state:
             args["storage_state"] = state

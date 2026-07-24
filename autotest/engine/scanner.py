@@ -16,6 +16,7 @@ from urllib.parse import urlparse
 
 import yaml
 from playwright.sync_api import sync_playwright, Page
+from . import browser as B
 from .state import valid_storage_state
 
 
@@ -75,12 +76,23 @@ class PageScanner:
 
     # ---------- 表格识别 ----------
     def scan_table(self) -> Dict[str, Any]:
-        tbl = self.page.locator(".el-table").first
-        if tbl.count() == 0:
+        tables = self.page.locator(".el-table, .ant-table, table.data-table, table")
+        tbl = None
+        for i in range(tables.count()):
+            candidate = tables.nth(i)
+            try:
+                headers = candidate.locator(
+                    ".el-table__header-wrapper th .cell, .ant-table-thead th, thead th").all_inner_texts()
+                if candidate.is_visible() and any(h.strip() for h in headers):
+                    tbl = candidate
+                    break
+            except Exception:
+                continue
+        if tbl is None:
             return {}
-        headers = [h.strip() for h in
-                   tbl.locator(".el-table__header-wrapper th .cell").all_inner_texts() if h.strip()]
-        rows = tbl.locator(".el-table__body-wrapper tbody tr.el-table__row")
+        headers = [h.strip() for h in tbl.locator(
+            ".el-table__header-wrapper th .cell, .ant-table-thead th, thead th").all_inner_texts() if h.strip()]
+        rows = tbl.locator(".el-table__body-wrapper tbody tr.el-table__row, .ant-table-tbody tr, tbody tr")
 
         sample = {}
         if rows.count() > 0:
@@ -149,8 +161,8 @@ class PageScanner:
 def scan(url: str, storage_state: Optional[str] = None,
          headless: bool = True, wait: int = 3000) -> Dict[str, Any]:
     with sync_playwright() as pw:
-        browser = pw.chromium.launch(headless=headless)
-        args = {"viewport": {"width": 1600, "height": 900}, "locale": "zh-CN"}
+        browser = B.launch(pw, headless=headless)
+        args = B.context_args()
         state = valid_storage_state(storage_state)
         if state:
             args["storage_state"] = state
