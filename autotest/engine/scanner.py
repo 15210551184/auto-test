@@ -90,16 +90,25 @@ class PageScanner:
                 continue
         if tbl is None:
             return {}
-        headers = _unique([h.strip() for h in tbl.locator(
-            ".el-table__header-wrapper th .cell, .ant-table-thead th, thead th").all_inner_texts() if h.strip()])
-        rows = tbl.locator(".el-table__body-wrapper tbody tr.el-table__row, .ant-table-tbody tr, tbody tr")
+
+        # 冻结列（左固定/右固定）会让 Element/Antd 把表头和表体各多渲染一份，
+        # 表头、表体必须各自只取「第一个」容器，按下标才能严格一一对应——
+        # 之前不限定容器时，两份表头会先被 _unique() 去重掉，但单元格取值
+        # 仍按原始（含重复）下标去对，导致取样值整体错位，殃及后面所有列：
+        # 搜索用例的种子值、列类型猜测全部跟着错。
+        header_cells = tbl.locator(
+            ".el-table__header-wrapper, .ant-table-thead, thead").first.locator("th .cell, th")
+        rows = tbl.locator(
+            ".el-table__body-wrapper, .ant-table-tbody, tbody").first.locator("tr.el-table__row, tr")
+
+        headers = _unique([h.strip() for h in header_cells.all_inner_texts() if h.strip()])
 
         sample = {}
         if rows.count() > 0:
             cells = rows.nth(0).locator("td")
-            for j, h in enumerate(headers):
-                if j < cells.count():
-                    sample[h] = cells.nth(j).inner_text().strip()[:40]
+            n = min(len(headers), cells.count())
+            for j in range(n):
+                sample[headers[j]] = cells.nth(j).inner_text().strip()[:40]
 
         return {
             "headers": headers,
