@@ -134,6 +134,24 @@ def page_config_path(dir_name: str, page_name: str) -> Path:
     return PROJECTS_DIR / _safe(dir_name) / "pages" / f"{_safe(page_name)}.yaml"
 
 
+def remove_page(dir_name: str, page_name: str) -> bool:
+    """从菜单地图移除一个页面，并删除它已生成的用例配置。"""
+    data = load_project(dir_name)
+    if not data:
+        return False
+    kept = [p for p in data.get("pages", []) if p.get("name") != page_name]
+    if len(kept) == len(data.get("pages", [])):
+        return False
+    for item in kept:
+        item.pop("has_config", None)
+    data["pages"] = kept
+    save_project(data)
+    config = page_config_path(dir_name, page_name)
+    if config.is_file():
+        config.unlink()
+    return True
+
+
 def selected_pages(dir_name: str) -> List[Dict]:
     data = load_project(dir_name)
     if not data:

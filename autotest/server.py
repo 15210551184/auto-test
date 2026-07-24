@@ -411,6 +411,15 @@ def api_selection(d):
     return jsonify({"ok": True, "selected": n})
 
 
+@app.delete("/api/projects/<d>/pages/<page>")
+def api_delete_page(d, page):
+    if not P.load_project(d):
+        return jsonify({"ok": False, "msg": "项目不存在"}), 404
+    if not P.remove_page(d, page):
+        return jsonify({"ok": False, "msg": "页面不存在"}), 404
+    return jsonify({"ok": True})
+
+
 @app.get("/reports/<path:sub>")
 def serve_report(sub):
     return send_from_directory(REPORT_DIR, sub)

@@ -54,6 +54,8 @@ button.primary:hover:not(:disabled){background:#2a63d6}
 button.sm{padding:5px 10px;font-size:12px}
 button.link{border:none;background:none;color:var(--busy);padding:4px 6px}
 button.link:hover:not(:disabled){background:#eef3fd}
+button.danger{border:none;background:none;color:var(--fail);padding:4px 6px}
+button.danger:hover:not(:disabled){background:#fdeced}
 .btns{display:flex;gap:8px;flex-wrap:wrap}
 .btns.fill button{flex:1;min-width:104px}
 .hint{font-size:12px;color:var(--ink-3);margin-top:9px;line-height:1.5}
@@ -273,13 +275,23 @@ function renderTree(){
       h+='<label class="item '+(p.selected?'':'off')+'">'+
          '<input type="checkbox" data-i="'+i+'" '+(p.selected?'checked':'')+'>'+
          '<span class="nm">'+esc(p.name)+'</span>'+
-         '<span class="tags">'+tags.join('')+'</span></label>';
+         '<span class="tags">'+tags.join('')+'<button class="danger sm" type="button" data-del="'+i+'">删除</button></span></label>';
     });
   }
   tree.innerHTML=h;
   tree.querySelectorAll('input[type=checkbox]').forEach(cb=>{
     cb.onchange=()=>{pages[+cb.dataset.i].selected=cb.checked;
       cb.closest('.item').classList.toggle('off',!cb.checked);syncSel();};
+  });
+  tree.querySelectorAll('[data-del]').forEach(btn=>{
+    btn.onclick=async e=>{e.preventDefault();e.stopPropagation();
+      const p=pages[+btn.dataset.del];
+      if(!p||!confirm('删除“'+p.name+'”吗？\n该页面已生成的用例也会一并删除，无法恢复。')) return;
+      const r=await fetch('/api/projects/'+encodeURIComponent(proj.dir)+'/pages/'+encodeURIComponent(p.name),{method:'DELETE'});
+      const data=await r.json().catch(()=>({}));
+      if(!r.ok||!data.ok) return toast(data.msg||'删除失败',true);
+      pages.splice(+btn.dataset.del,1);renderTree();toast('已删除“'+p.name+'”及其用例');
+    };
   });
   updateCount();
 }
