@@ -60,6 +60,38 @@ def _progress(callback, message: str) -> None:
         callback(message)
 
 
+def _menu_route(item) -> Optional[str]:
+    """读取菜单组件的路由 index；Vue 2 的 prop 不一定会渲染为 DOM 属性。"""
+    for attr in ("index", "data-index", "href"):
+        try:
+            value = item.get_attribute(attr)
+            if value and value not in ("#", "javascript:;"):
+                return value
+        except Exception:
+            continue
+    try:
+        value = item.evaluate("""el => {
+          const vm = el.__vue__;
+          return vm && (vm.index || (vm.$props && vm.$props.index));
+        }""")
+        return value if isinstance(value, str) and value else None
+    except Exception:
+        return None
+
+
+def _route_url(home_url: str, route: Optional[str]) -> Optional[str]:
+    """将菜单路由转换为同一单页应用下的完整 URL。"""
+    if not route or route.startswith(("javascript:", "#")):
+        return None
+    home = urlparse(home_url)
+    if route.startswith(("http://", "https://")):
+        target = urlparse(route)
+        return route if target.netloc == home.netloc else None
+    prefix = home.path.rsplit("/", 1)[0].rstrip("/")
+    path = route if route.startswith(prefix + "/") else f"{prefix}/{route.lstrip('/')}"
+    return f"{home.scheme}://{home.netloc}{path}"
+
+
 def _collect_visible_leaves(page: Page, leaves: List[Dict], seen: Set[str]) -> int:
     """收集当前展开分支的叶子菜单。"""
     added = 0
@@ -79,6 +111,7 @@ def _collect_visible_leaves(page: Page, leaves: List[Dict], seen: Set[str]) -> i
             seen.add(key)
             leaves.append({"name": name, "group": group,
                            "menu_index": item.get_attribute("index") or item.get_attribute("data-index"),
+                           "menu_route": _menu_route(item),
                            "parent_indexes": _menu_indexes(item)})
             added += 1
         if added:
@@ -257,6 +290,25 @@ def crawl_menu(page: Page, home_url: str, max_pages: int = 60,
         name = leaf["name"]
         _progress(on_progress, f"探测页面 {index}/{min(len(leaves), max_pages)}：{name}")
         try:
+            direct_url = _route_url(home_url, leaf.get("menu_route"))
+            if direct_url:
+                _progress(on_progress, f"  通过菜单路由访问：{direct_url}")
+                page.goto(direct_url, wait_until="domcontentloaded", timeout=30000)
+                page.wait_for_timeout(1200)
+                url = page.url
+                if is_login_page(page):
+                    _progress(on_progress, "  跳过：会话已回到登录页")
+                    continue
+                key = url.split("?")[0]
+                if key in seen_url:
+                    _progress(on_progress, "  跳过：与已发现页面 URL 重复")
+                    continue
+                seen_url.add(key)
+                info = _probe_page(page)
+                out.append({"name": name, "group": leaf["group"], "url": url, **info})
+                _progress(on_progress, f"  完成：已保留 {len(out)} 个页面")
+                continue
+
             page.goto(home_url, wait_until="domcontentloaded", timeout=30000)
             page.wait_for_timeout(900)
             _open_menu_path(page, leaf["group"], leaf.get("parent_indexes"))

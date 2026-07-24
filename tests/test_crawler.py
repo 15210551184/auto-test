@@ -13,7 +13,7 @@ if "playwright.sync_api" not in sys.modules:
     sys.modules["playwright"] = playwright
     sys.modules["playwright.sync_api"] = sync_api
 
-from autotest.engine.crawler import _progress
+from autotest.engine.crawler import _progress, _route_url
 
 
 class CrawlerProgressTests(unittest.TestCase):
@@ -23,3 +23,7 @@ class CrawlerProgressTests(unittest.TestCase):
         _progress(messages.append, "正在展开 2/5：订单管理")
 
         self.assertEqual(["正在展开 2/5：订单管理"], messages)
+
+    def test_route_url_keeps_application_prefix(self):
+        self.assertEqual("http://example.test/web/charging/priceTemplate",
+                         _route_url("http://example.test/web/index", "/charging/priceTemplate"))
