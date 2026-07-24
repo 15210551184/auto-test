@@ -1,0 +1,174 @@
+# 订单列表页 —— 对应截图的手工调优配置
+# 由 scan 生成骨架后人工补充了业务断言
+
+name: 订单列表
+url: http://43.114.176.231/web/order/list
+
+# ---------- UI 自动登录 ----------
+# 密码不要写在这里（配置要进 git）。放 .env 文件，这里用 ${env:XXX} 引用。
+# 懒登录：先试已存的 cookie，失效了才真正登录，所以不会每次跑都登。
+login:
+  url: http://43.114.176.231/web/login    # 登录页地址，按实际改
+  username: ${env:AUTOTEST_USER}
+  password: ${env:AUTOTEST_PASS}
+
+  # 下面三个选择器留空会自动探测（覆盖大多数后台）。
+  # 探测失败时报错会提示你填，F12 选中元素 → 右键 Copy → Copy selector
+  # user_selector: "input[placeholder='请输入用户名']"
+  # pass_selector: "input[type='password']"
+  # submit_selector: ".login-btn"
+
+  # 登录成功的判据。留空则用"离开登录页"判断，够用。
+  # 如果你的系统登录失败也会跳转，就填一个只有登录后才会出现的 URL 片段。
+  # success_url_contains: "/web/"
+
+  # 登录页还需要别的操作时用（比如选租户、勾同意条款）
+  # extra_steps:
+  #   - click: ".agree-checkbox"
+
+# 列表接口路径片段，用于 search 动作等待响应
+# 用 scan 命令可自动探测；不确定就注释掉，会退化成等 networkidle
+list_api: /order/list
+
+# direct=点按钮直接下载  async=需轮询任务接口  auto=先试 direct 再试 async
+export_mode: auto
+# export_task_api: /web/export/task/list   # async 模式才需要
+
+selectors:
+  table: ".el-table"
+  search_btn: "button:has-text('搜索')"
+  reset_btn: "button:has-text('重置')"
+  export_btn: "button:has-text('导出')"
+
+cases:
+  # ---------- 冒烟 ----------
+  - name: 列表默认加载
+    tags: [smoke]
+    steps:
+      - assert_headers:
+          contains: [乘车人, 司机, 订单金额, 实际支付金额, 平台抵扣总额, 创建时间]
+      - assert_row_count: { min: 1 }
+      - assert_no_console_error: null
+      - assert_no_failed_request: null
+
+  # ---------- 搜索条件 ----------
+  - name: 搜索-下单人手机号
+    tags: [search]
+    steps:
+      - fill: { label: 下单人手机号, value: "222" }
+      - search: null
+      - assert_column_all: { column: 下单人手机号, contains: "222" }
+
+  - name: 搜索-司机手机号
+    tags: [search]
+    steps:
+      - fill: { label: 司机手机号, value: "12345678900" }
+      - search: null
+      - assert_column_all: { column: 司机手机号, equals: "12345678900" }
+
+  - name: 搜索-订单号不存在
+    tags: [search]
+    steps:
+      - fill: { label: 订单号, value: "NOTEXIST_${random}" }
+      - search: null
+      - assert_row_count: { equals: 0 }
+
+  # ---------- 下拉筛选 ----------
+  - name: 筛选-订单状态
+    tags: [search]
+    steps:
+      - select: { label: 订单状态, index: 0 }
+      - search: null
+      - assert_row_count: { min: 0 }
+      # 选中的文本存进 ${selected_订单状态}，回来断言列值一致
+      - assert_column_all: { column: 订单状态, equals: "${selected_订单状态}" }
+
+  - name: 筛选-城市
+    tags: [search]
+    steps:
+      - select: { label: 城市, index: 0 }
+      - search: null
+      - assert_row_count: { min: 0 }
+
+  - name: 筛选-订单服务类型
+    tags: [search]
+    steps:
+      - select: { label: 订单服务类型, index: 0 }
+      - search: null
+      - assert_row_count: { min: 0 }
+
+  # ---------- 时间范围 ----------
+  - name: 时间筛选-下单时间
+    tags: [search]
+    steps:
+      - date_range:
+          label: 下单时间
+          start: "${days_ago_7}"
+          end: "${today}"
+      - search: null
+      - assert_column_range:
+          column: 创建时间
+          start: "${days_ago_7} 00:00:00"
+          end: "${today} 23:59:59"
+          kind: date
+
+  # ---------- 重置 ----------
+  - name: 重置搜索条件
+    tags: [search]
+    steps:
+      - fill: { label: 下单人手机号, value: "222" }
+      - fill: { label: 订单号, value: "ZZ_TEST" }
+      - search: null
+      - click: reset_btn
+      - wait: 800
+      - assert_inputs_empty:
+          labels: [订单号, 下单人手机号, 司机手机号]
+
+  # ---------- 列表数据质量 ----------
+  - name: 列表数据质量
+    tags: [list]
+    steps:
+      - assert_column_not_empty: { column: 创建时间 }
+      - assert_column_not_empty: { column: 下单人手机号 }
+      # 司机可能未派单，允许 50% 为空
+      - assert_column_not_empty: { column: 司机, allow_ratio: 0.5 }
+      - assert_sorted: { column: 创建时间, order: desc, kind: date }
+
+  # ---------- 前后端一致性 ----------
+  # 这条最容易抓到真 bug：金额单位（分/元）、时区、状态码映射
+  # mapping 的接口字段名需要打开 devtools 看一眼实际返回后填写
+  - name: 接口与表格渲染一致
+    tags: [consistency]
+    skip: true          # 填完 mapping 后把这行删掉
+    steps:
+      - search: null
+      - assert_api_matches_table:
+          list_path: data.records
+          mapping:
+            下单人手机号: userPhone
+            订单金额: orderAmount
+            实际支付金额: payAmount
+            创建时间: createTime
+
+  # ---------- 导出 ----------
+  - name: 导出全量数据验证
+    tags: [export]
+    steps:
+      - search: null
+      - capture: page_data
+      - export_and_verify:
+          compare_with: page_data
+          columns: [下单人手机号, 乘车人手机号, 订单金额, 实际支付金额, 创建时间]
+          row_count: total       # 导出应是全量，与分页总数比对
+          timeout: 90000
+
+  - name: 导出-带搜索条件
+    tags: [export]
+    steps:
+      - fill: { label: 下单人手机号, value: "222" }
+      - search: null
+      - capture: filtered_data
+      - export_and_verify:
+          compare_with: filtered_data
+          columns: [下单人手机号, 订单金额, 创建时间]
+          row_count: total       # 导出必须遵循搜索条件，不能导全库

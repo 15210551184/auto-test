@@ -1,0 +1,414 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>自动化数据验证控制台</title>
+<style>
+:root{
+  --ink:#12161c; --ink-2:#5a6472; --ink-3:#8f99a8;
+  --line:#dde2e9; --bg:#eef1f5; --panel:#fff;
+  --pass:#0f9b6c; --fail:#d64550; --busy:#2f6fed;
+  --term-bg:#12161c; --term-fg:#c8d2df; --r:6px;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);
+  font:14px/1.55 -apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif}
+.term,code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+header{background:var(--panel);border-bottom:1px solid var(--line);padding:0 20px;height:52px;
+  display:flex;align-items:center;gap:12px;position:sticky;top:0;z-index:20}
+header h1{font-size:15px;font-weight:600;margin:0}
+header .sep{color:var(--line)}
+#projSel{width:auto;min-width:190px;padding:6px 9px;font-size:13px}
+#globalState{margin-left:auto;font-size:12px;padding:3px 10px;border-radius:20px;
+  background:#eef1f5;color:var(--ink-2);display:flex;align-items:center;gap:6px}
+#globalState .dot{width:7px;height:7px;border-radius:50%;background:var(--ink-3)}
+#globalState.busy{background:#e8f0fe;color:var(--busy)}
+#globalState.busy .dot{background:var(--busy);animation:pulse 1.1s infinite}
+#globalState.ok{background:#e6f6ef;color:var(--pass)} #globalState.ok .dot{background:var(--pass)}
+#globalState.bad{background:#fdeced;color:var(--fail)} #globalState.bad .dot{background:var(--fail)}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.25}}
+.wrap{max-width:1400px;margin:0 auto;padding:18px 20px 40px;
+  display:grid;grid-template-columns:1fr 400px;gap:18px;align-items:start}
+@media(max-width:1000px){.wrap{grid-template-columns:1fr}}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);margin-bottom:16px}
+.card>h2{margin:0;padding:11px 15px;font-size:12px;font-weight:600;letter-spacing:.09em;
+  text-transform:uppercase;color:var(--ink-3);border-bottom:1px solid var(--line);
+  display:flex;align-items:center;gap:8px}
+.card>h2 .count{margin-left:auto;font-size:11px;letter-spacing:0;text-transform:none;
+  color:var(--ink-3);font-weight:400}
+.card .body{padding:13px 15px}
+label{display:block;font-size:12px;color:var(--ink-2);margin:0 0 5px}
+select,input[type=text],input[type=password]{width:100%;padding:8px 10px;border:1px solid var(--line);
+  border-radius:5px;font-size:13px;background:#fff;color:var(--ink);font-family:inherit}
+select:focus,input:focus{outline:2px solid #b9cdf6;outline-offset:-1px;border-color:var(--busy)}
+.row{margin-bottom:12px}.row:last-child{margin-bottom:0}
+.two{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+button{font:500 13px/1 inherit;padding:9px 14px;border-radius:5px;cursor:pointer;
+  border:1px solid var(--line);background:#fff;color:var(--ink);transition:background .12s}
+button:hover:not(:disabled){background:#f5f7fa;border-color:#c3cbd6}
+button:focus-visible{outline:2px solid var(--busy);outline-offset:1px}
+button:disabled{opacity:.45;cursor:not-allowed}
+button.primary{background:var(--busy);border-color:var(--busy);color:#fff}
+button.primary:hover:not(:disabled){background:#2a63d6}
+button.sm{padding:5px 10px;font-size:12px}
+button.link{border:none;background:none;color:var(--busy);padding:4px 6px}
+button.link:hover:not(:disabled){background:#eef3fd}
+.btns{display:flex;gap:8px;flex-wrap:wrap}
+.btns.fill button{flex:1;min-width:104px}
+.hint{font-size:12px;color:var(--ink-3);margin-top:9px;line-height:1.5}
+.tree{max-height:490px;overflow-y:auto}
+.grp{padding:8px 15px 4px;font-size:11px;font-weight:600;letter-spacing:.06em;
+  color:var(--ink-3);background:#fafbfc;border-bottom:1px solid #f0f2f5;position:sticky;top:0;z-index:1}
+.item{display:flex;align-items:center;gap:10px;padding:9px 15px;
+  border-bottom:1px solid #f4f6f8;cursor:pointer}
+.item:hover{background:#f8fafc}
+.item:last-child{border-bottom:none}
+.item input{width:15px;height:15px;flex:0 0 15px;accent-color:var(--busy);cursor:pointer}
+.item .nm{font-size:13.5px}
+.item.off .nm{color:var(--ink-3)}
+.tags{margin-left:auto;display:flex;gap:5px;align-items:center;flex-wrap:wrap;justify-content:flex-end}
+.tag{font-size:11px;padding:2px 7px;border-radius:3px;background:#eef1f5;color:var(--ink-2);white-space:nowrap}
+.tag.rec{background:#e6f6ef;color:var(--pass)}
+.tag.no{background:#f6f7f9;color:var(--ink-3)}
+.tag.cfg{background:#e8f0fe;color:var(--busy)}
+.selbar{display:flex;align-items:center;gap:10px;padding:9px 15px;
+  border-bottom:1px solid var(--line);background:#fafbfc;font-size:12.5px;color:var(--ink-2)}
+.selbar .right{margin-left:auto;display:flex;gap:4px}
+.term-card{background:var(--term-bg);border-color:#252c36}
+.term-card>h2{color:#7d8899;border-bottom-color:#252c36}
+.term-head{display:flex;align-items:center;gap:10px;width:100%}
+.term-head .job{color:#c8d2df;font-size:12px;letter-spacing:0;text-transform:none;font-weight:400}
+.term-head .elapsed{margin-left:auto;color:#5e6a7a;font-size:11px;letter-spacing:0;text-transform:none}
+.term{padding:12px 15px;height:300px;overflow-y:auto;font-size:12.5px;line-height:1.65;
+  color:var(--term-fg);white-space:pre-wrap;word-break:break-all}
+.term::-webkit-scrollbar{width:9px}
+.term::-webkit-scrollbar-thumb{background:#333c48;border-radius:5px}
+.term .l-pass{color:#4fce9b} .term .l-fail{color:#ff7b85}
+.term .l-warn{color:#f0b45e} .term .l-dim{color:#6b7686} .term .l-head{color:#7fb0ff}
+.term .empty{color:#5e6a7a;font-style:italic}
+.term-foot{border-top:1px solid #252c36;padding:9px 15px;display:flex;align-items:center;
+  gap:10px;font-size:12px;color:#7d8899}
+.term-foot label{margin:0;color:#7d8899;display:flex;align-items:center;gap:5px;font-size:12px}
+.term-foot .right{margin-left:auto;display:flex;gap:8px}
+.term-foot button{background:transparent;border-color:#333c48;color:#9aa6b5;padding:5px 10px;font-size:12px}
+.term-foot button:hover:not(:disabled){background:#1c222b}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th{text-align:left;padding:8px 15px;font-size:11px;font-weight:600;letter-spacing:.06em;
+  text-transform:uppercase;color:var(--ink-3);border-bottom:1px solid var(--line)}
+td{padding:9px 15px;border-bottom:1px solid #f0f2f5}
+tr:last-child td{border-bottom:none}
+tbody tr:hover{background:#f8fafc}
+td.time{color:var(--ink-2);font-size:12.5px;white-space:nowrap}
+.tally{display:flex;gap:5px;align-items:center;font-size:12.5px}
+.tally b{font-weight:600} .tally .p{color:var(--pass)} .tally .f{color:var(--fail)}
+.tally .slash{color:var(--line)}
+.bar{height:4px;border-radius:2px;background:#eceff3;overflow:hidden;width:66px;margin-top:4px}
+.bar i{display:block;height:100%;background:var(--pass)}
+.bar i.has-fail{background:linear-gradient(90deg,var(--pass) var(--w),var(--fail) var(--w))}
+a.open{color:var(--busy);text-decoration:none;font-size:12.5px}
+a.open:hover{text-decoration:underline}
+.empty-state{padding:28px 15px;text-align:center;color:var(--ink-3);font-size:13px;line-height:1.7}
+.mask{position:fixed;inset:0;background:rgba(18,22,28,.42);display:none;
+  align-items:center;justify-content:center;z-index:40;padding:20px}
+.mask.show{display:flex}
+.modal{background:#fff;border-radius:8px;width:460px;max-width:100%;max-height:90vh;overflow:auto}
+.modal h3{margin:0;padding:15px 18px;font-size:14px;border-bottom:1px solid var(--line)}
+.modal .body{padding:16px 18px}
+.modal .foot{padding:12px 18px;border-top:1px solid var(--line);display:flex;gap:8px;justify-content:flex-end}
+#toast{position:fixed;bottom:22px;left:50%;transform:translateX(-50%) translateY(80px);
+  background:var(--ink);color:#fff;padding:10px 18px;border-radius:6px;font-size:13px;
+  opacity:0;transition:.25s;pointer-events:none;z-index:50;max-width:80vw}
+#toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+#toast.bad{background:var(--fail)}
+@media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+</style>
+</head>
+<body>
+<header>
+  <h1>自动化数据验证</h1>
+  <span class="sep">/</span>
+  <select id="projSel"></select>
+  <button class="sm" id="btnNewProj">新建系统</button>
+  <span id="globalState"><span class="dot"></span><span id="stateText">空闲</span></span>
+</header>
+<div class="wrap">
+  <div>
+    <div class="card">
+      <h2>测试哪些菜单 <span class="count" id="pageCount"></span></h2>
+      <div class="selbar" id="selBar" style="display:none">
+        <span id="selInfo"></span>
+        <div class="right">
+          <button class="link sm" data-pick="rec">选推荐</button>
+          <button class="link sm" data-pick="all">全选</button>
+          <button class="link sm" data-pick="none">清空</button>
+        </div>
+      </div>
+      <div class="tree" id="tree">
+        <div class="empty-state">先在右侧「扫描系统菜单」，把这个系统的页面抓出来。</div>
+      </div>
+    </div>
+    <div class="card term-card">
+      <h2><div class="term-head">
+        <span>运行日志</span><span class="job" id="jobName"></span>
+        <span class="elapsed" id="elapsed"></span>
+      </div></h2>
+      <div class="term" id="term"><span class="empty">暂无运行记录。</span></div>
+      <div class="term-foot">
+        <label><input type="checkbox" id="autoscroll" checked> 自动滚动</label>
+        <div class="right">
+          <button id="btnStop" disabled>终止</button>
+          <button id="btnClear">清空</button>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div>
+    <div class="card">
+      <h2>操作</h2>
+      <div class="body">
+        <div class="row btns fill">
+          <button id="btnDiscover">扫描系统菜单</button>
+        </div>
+        <div class="hint" style="margin-bottom:14px">
+          登录后展开左侧菜单，逐个访问并识别有没有表格、能不能导出。首次使用先点这个。
+        </div>
+        <div class="row btns fill">
+          <button id="btnGen">生成用例</button>
+          <button class="primary" id="btnRunSel">执行测试</button>
+        </div>
+        <div class="hint">
+          「生成用例」给勾选的页面各建一份配置，已有的不覆盖，不会冲掉你手工补的断言。
+          「执行测试」跑勾选的页面，全程只登录一次。
+        </div>
+      </div>
+    </div>
+    <div class="card">
+      <h2>历史报告 <span class="count" id="repCount"></span></h2>
+      <div id="repWrap"><div class="empty-state">还没有报告。</div></div>
+    </div>
+  </div>
+</div>
+<div class="mask" id="mask">
+  <div class="modal">
+    <h3>新建系统</h3>
+    <div class="body">
+      <div class="row"><label>系统名称</label>
+        <input type="text" id="npName" placeholder="出行管理系统"></div>
+      <div class="row"><label>登录后的首页地址</label>
+        <input type="text" id="npHome" placeholder="http://43.114.176.231/web/order/list"></div>
+      <div class="row"><label>登录页地址</label>
+        <input type="text" id="npLogin" placeholder="http://43.114.176.231/web/login"></div>
+      <div class="row two">
+        <div><label>账号</label><input type="text" id="npUser" placeholder="留空则读 .env"></div>
+        <div><label>密码</label><input type="password" id="npPass" placeholder="留空则读 .env"></div>
+      </div>
+      <div class="row"><label>登录成功的标志元素（选填）</label>
+        <input type="text" id="npExpect" placeholder=".el-menu"></div>
+      <div class="hint">标志元素用来判断登录态是否还有效：填一个登录后才会出现的元素，
+        比如侧边菜单 <code>.el-menu</code>。留空则只看是否跳回登录页。</div>
+    </div>
+    <div class="foot">
+      <button id="npCancel">取消</button>
+      <button class="primary" id="npOk">创建</button>
+    </div>
+  </div>
+</div>
+<div id="toast"></div>
+<script>
+const $ = s => document.querySelector(s);
+const term = $('#term');
+let proj = null, pages = [], everStreamed = false;
+function toast(m,bad){const t=$('#toast');t.textContent=m;
+  t.className='show'+(bad?' bad':'');clearTimeout(t._t);t._t=setTimeout(()=>t.className='',3200);}
+function setState(k,t){$('#globalState').className=k;$('#stateText').textContent=t;}
+async function get(u){return (await fetch(u)).json();}
+async function post(u,b){const r=await fetch(u,{method:'POST',
+  headers:{'Content-Type':'application/json'},body:JSON.stringify(b||{})});
+  return {ok:r.ok,data:await r.json().catch(()=>({}))};}
+function esc(s){return String(s==null?'':s).replace(/[<>&]/g,c=>({'<':'&lt;','>':'&gt;','&':'&amp;'}[c]));}
+
+async function loadProjects(keep){
+  const ps = await get('/api/projects');
+  const sel = $('#projSel'); sel.innerHTML='';
+  if(!ps.length){ sel.innerHTML='<option value="">还没有系统</option>';
+    proj=null; pages=[]; renderTree(); return; }
+  ps.forEach(p=>{const o=document.createElement('option');
+    o.value=p.dir;o.textContent=p.name+'（'+p.page_count+' 页）';sel.appendChild(o);});
+  if(keep && ps.some(p=>p.dir===keep)) sel.value=keep;
+  await loadProject();
+}
+async function loadProject(){
+  const d=$('#projSel').value;
+  if(!d){proj=null;pages=[];return renderTree();}
+  proj = await get('/api/projects/'+encodeURIComponent(d));
+  pages = proj.pages||[]; renderTree();
+}
+$('#projSel').onchange = loadProject;
+
+function renderTree(){
+  const tree=$('#tree');
+  if(!proj){tree.innerHTML='<div class="empty-state">先新建一个系统。</div>';
+    $('#pageCount').textContent='';$('#selBar').style.display='none';return;}
+  if(!pages.length){
+    tree.innerHTML='<div class="empty-state">还没扫描过菜单。<br>点右侧「扫描系统菜单」开始。</div>';
+    $('#pageCount').textContent='';$('#selBar').style.display='none';return;}
+  $('#selBar').style.display='flex';
+  const groups={};
+  pages.forEach((p,i)=>{const g=p.group||'未分组';(groups[g]=groups[g]||[]).push([p,i]);});
+  let h='';
+  for(const g in groups){
+    h+='<div class="grp">'+esc(g)+'</div>';
+    groups[g].forEach(function(pair){
+      const p=pair[0],i=pair[1],tags=[];
+      if(p.has_config) tags.push('<span class="tag cfg">已生成用例</span>');
+      if(p.has_table) tags.push('<span class="tag">'+p.columns+' 列</span>');
+      else tags.push('<span class="tag no">无表格</span>');
+      if(p.has_export) tags.push('<span class="tag">可导出</span>');
+      if(p.has_create) tags.push('<span class="tag">可新增</span>');
+      if(p.recommended) tags.push('<span class="tag rec">推荐</span>');
+      h+='<label class="item '+(p.selected?'':'off')+'">'+
+         '<input type="checkbox" data-i="'+i+'" '+(p.selected?'checked':'')+'>'+
+         '<span class="nm">'+esc(p.name)+'</span>'+
+         '<span class="tags">'+tags.join('')+'</span></label>';
+    });
+  }
+  tree.innerHTML=h;
+  tree.querySelectorAll('input[type=checkbox]').forEach(cb=>{
+    cb.onchange=()=>{pages[+cb.dataset.i].selected=cb.checked;
+      cb.closest('.item').classList.toggle('off',!cb.checked);syncSel();};
+  });
+  updateCount();
+}
+function updateCount(){
+  const n=pages.filter(p=>p.selected).length;
+  $('#pageCount').textContent=pages.length+' 个页面';
+  const w=pages.filter(p=>p.selected&&p.has_config).length;
+  $('#selInfo').innerHTML='已选 <b>'+n+'</b> 个'+(n?' · 其中 '+w+' 个已有用例':'');
+}
+let syncTimer;
+function syncSel(){
+  updateCount(); clearTimeout(syncTimer);
+  syncTimer=setTimeout(async()=>{ if(!proj)return;
+    await post('/api/projects/'+encodeURIComponent(proj.dir)+'/selection',
+      {names:pages.filter(p=>p.selected).map(p=>p.name)});},400);
+}
+document.querySelectorAll('[data-pick]').forEach(b=>{
+  b.onclick=()=>{const m=b.dataset.pick;
+    pages.forEach(p=>p.selected = m==='all'?true : m==='none'?false : !!p.recommended);
+    renderTree();syncSel();};
+});
+
+function lineClass(s){
+  if(s.indexOf('✓')>=0||/通过 \d/.test(s)) return 'l-pass';
+  if(s.indexOf('✗')>=0||s.indexOf('失败')>=0||s.indexOf('Error')>=0||s.indexOf('Traceback')>=0) return 'l-fail';
+  if(/^\s*[└·]/.test(s)) return 'l-dim';
+  if(/^\s*\[\d+\/\d+\]/.test(s)||s.indexOf('全部完成')>=0||s.indexOf('报告:')>=0||
+     s.indexOf('执行 ')===0||s.indexOf('扫描 ')===0||s.indexOf('发现 ')===0) return 'l-head';
+  if(s.indexOf('跳过')>=0) return 'l-warn';
+  return '';
+}
+function appendLine(s){
+  if(!everStreamed){term.innerHTML='';everStreamed=true;}
+  const d=document.createElement('div'),c=lineClass(s);
+  if(c)d.className=c; d.textContent=s; term.appendChild(d);
+  if($('#autoscroll').checked) term.scrollTop=term.scrollHeight;
+}
+async function loadReports(){
+  const rs=await get('/api/reports');
+  $('#repCount').textContent=rs.length?'共 '+rs.length+' 次':'';
+  if(!rs.length){$('#repWrap').innerHTML='<div class="empty-state">还没有报告。</div>';return;}
+  let h='<table><thead><tr><th>时间</th><th>结果</th><th></th></tr></thead><tbody>';
+  rs.forEach(r=>{
+    let cell='<span style="color:var(--ink-3)">—</span>';
+    if(r.total!=null){
+      const pct=r.total?Math.round(r.passed/r.total*100):0;
+      const s=r.failed
+        ? '<b class="f">'+r.failed+'</b> 失败 <span class="slash">·</span> <b class="p">'+r.passed+'</b> 通过'
+        : '<b class="p">全部 '+r.passed+' 条通过</b>';
+      cell='<div class="tally">'+s+'</div><div class="bar"><i class="'+
+           (r.failed?'has-fail':'')+'" style="width:100%;--w:'+pct+'%"></i></div>';
+    }
+    h+='<tr><td class="time">'+r.time+'</td><td>'+cell+
+       '</td><td style="text-align:right"><a class="open" href="'+r.url+'" target="_blank">查看</a></td></tr>';
+  });
+  $('#repWrap').innerHTML=h+'</tbody></table>';
+}
+async function trigger(action){
+  if(!proj) return toast('请先选择或新建一个系统',true);
+  const sel=pages.filter(p=>p.selected);
+  if((action==='batch-scan'||action==='batch-run')&&!sel.length)
+    return toast('请先勾选要测试的菜单',true);
+  if(action==='batch-run'&&!sel.some(p=>p.has_config))
+    return toast('勾选的页面还没有用例，请先点「生成用例」',true);
+  const r=await post('/api/run',{action:action,project:proj.dir});
+  if(!r.ok||!r.data.ok) return toast(r.data.msg||'启动失败',true);
+  term.innerHTML='';everStreamed=true;setBusy(true);
+}
+$('#btnDiscover').onclick=()=>trigger('discover');
+$('#btnGen').onclick=()=>trigger('batch-scan');
+$('#btnRunSel').onclick=()=>trigger('batch-run');
+$('#btnStop').onclick=async()=>{const r=await post('/api/stop');
+  toast(r.data.ok?'已发送终止信号':'当前没有运行中的任务',!r.data.ok);};
+$('#btnClear').onclick=()=>{term.innerHTML='<span class="empty">日志已清空。</span>';everStreamed=false;};
+function setBusy(b){
+  ['#btnDiscover','#btnGen','#btnRunSel','#btnNewProj'].forEach(s=>$(s).disabled=b);
+  $('#btnStop').disabled=!b;
+  if(b) setState('busy','执行中');
+}
+$('#btnNewProj').onclick=()=>$('#mask').classList.add('show');
+$('#npCancel').onclick=()=>$('#mask').classList.remove('show');
+$('#mask').onclick=e=>{if(e.target===$('#mask'))$('#mask').classList.remove('show');};
+$('#npOk').onclick=async()=>{
+  const body={name:$('#npName').value.trim(),home_url:$('#npHome').value.trim(),
+    login_url:$('#npLogin').value.trim(),expect_selector:$('#npExpect').value.trim()};
+  if($('#npUser').value.trim()) body.username=$('#npUser').value.trim();
+  if($('#npPass').value) body.password=$('#npPass').value;
+  const r=await post('/api/projects',body);
+  if(!r.ok||!r.data.ok) return toast(r.data.msg||'创建失败',true);
+  $('#mask').classList.remove('show');
+  ['#npName','#npHome','#npLogin','#npUser','#npPass','#npExpect'].forEach(s=>$(s).value='');
+  toast('系统已创建，接下来点「扫描系统菜单」');
+  await loadProjects(r.data.dir);
+};
+function connect(){
+  const es=new EventSource('/api/stream');
+  es.onmessage=e=>{const l=JSON.parse(e.data);
+    if(l==='__DONE__'){finish();return;} appendLine(l);};
+  es.onerror=()=>{es.close();setTimeout(connect,3000);};
+}
+async function finish(){
+  const st=await get('/api/status'); setBusy(false);
+  setState(st.returncode===0?'ok':'bad',
+    st.returncode===0?'完成 · '+st.elapsed+'s':'有失败 · '+st.elapsed+'s');
+  $('#elapsed').textContent='';
+  await loadProjects(proj&&proj.dir);
+  await loadReports();
+  if(st.report_url){
+    const d=document.createElement('div');
+    d.innerHTML='<a class="open" href="'+st.report_url+'" target="_blank">→ 打开本次报告</a>';
+    term.appendChild(d);
+    if($('#autoscroll').checked) term.scrollTop=term.scrollHeight;
+  }
+}
+async function poll(){
+  const st=await get('/api/status');
+  $('#jobName').textContent=st.name||'';
+  if(st.running){setBusy(true);$('#elapsed').textContent=st.elapsed+'s';}
+  return st;
+}
+(async function init(){
+  await loadProjects(); await loadReports();
+  const st=await poll();
+  if(st.lines&&st.lines.length){
+    term.innerHTML='';everStreamed=true;
+    st.lines.forEach(l=>{if(l!=='__DONE__')appendLine(l);});
+  }
+  if(!st.running&&st.returncode!==null)
+    setState(st.returncode===0?'ok':'bad',st.returncode===0?'上次全部通过':'上次有失败');
+  connect();
+  setInterval(()=>{if(!$('#btnStop').disabled)poll();},1000);
+})();
+</script>
+</body>
+</html>

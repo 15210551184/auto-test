@@ -1,0 +1,16 @@
+services:
+  autotest:
+    build: .
+    image: autotest
+    container_name: autotest
+    restart: unless-stopped
+    ports:
+      - "5000:5000"
+    volumes:
+      - ./configs:/app/configs      # 配置改了不用重新 build
+      - ./reports:/app/reports      # 报告留在宿主机
+      - ./.env:/app/.env:ro
+      - ./auth.json:/app/auth.json  # 登录态持久化，容器重启不用重登
+    environment:
+      - TZ=Asia/Shanghai
+    shm_size: '1gb'                 # Chromium 需要，否则大页面会崩

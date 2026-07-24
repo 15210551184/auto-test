@@ -1,0 +1,8 @@
+.env
+auth.json
+reports/
+__pycache__/
+*.pyc
+venv/
+login_fail.png
+projects/*/pages/
