@@ -6,6 +6,7 @@
 10 个页面就要登 10 次。合并后只登一次，10 个页面串行跑完。
 """
 import os
+import threading
 import time
 import traceback
 from pathlib import Path
@@ -14,6 +15,7 @@ from typing import Callable, Dict, List, Optional
 import yaml
 from playwright.sync_api import sync_playwright
 
+from . import browser as B
 from . import project as P
 from . import scanner
 from .login import LoginError, ensure_logged_in, is_login_page
@@ -21,11 +23,43 @@ from .models import CaseResult, PageResult, Status
 from .runner import DEFAULT_SELECTORS, Context, load_config, run_case
 from .state import save_storage_state, valid_storage_state
 
+# 单页扫描的硬超时。scanner.scan() 内部各步骤都有超时，但加总起来（多个下拉框
+# 逐个探测选项、页面本身卡死等）仍可能远超预期；真出现过一个带地图/大量级联
+# 下拉的页面把整批扫描拖死在原地、既不报错也不失败的情况。这里兜底一刀切断。
+SCAN_TIMEOUT_SEC = 150
+
 
 def _log(cb, msg):
     print(msg, flush=True)
     if cb:
         cb(msg)
+
+
+def _scan_with_timeout(url: str, storage_state: Optional[str], timeout: int = SCAN_TIMEOUT_SEC) -> Dict:
+    """
+    在子线程里跑 scanner.scan()，超时就放弃等待、把这一页判失败，不拖死整批任务。
+
+    子线程用 daemon=True：如果目标页面真的把浏览器渲染进程卡死，这个线程会
+    一直卡在里面出不来，但作为 daemon 线程它不会阻止批量扫描继续跑下一页，
+    也不会阻止整个 batch-scan 进程最终退出（进程退出时 daemon 线程被直接终止，
+    残留的 Chromium 子进程通常会随驱动连接断开一并退出）。
+    """
+    box: Dict = {}
+
+    def worker():
+        try:
+            box["report"] = scanner.scan(url, storage_state=storage_state, headless=True)
+        except Exception as e:
+            box["error"] = e
+
+    t = threading.Thread(target=worker, daemon=True)
+    t.start()
+    t.join(timeout)
+    if t.is_alive():
+        raise TimeoutError(f"扫描超过 {timeout}s 未完成，页面可能卡死（地图/弹窗/死循环等），已跳过")
+    if "error" in box:
+        raise box["error"]
+    return box["report"]
 
 
 def scan_selected(dir_name: str, storage_state: Optional[str] = None,
@@ -59,7 +93,7 @@ def scan_selected(dir_name: str, storage_state: Optional[str] = None,
 
         try:
             _log(on_log, f"  [{i}/{len(pages)}] {name} — 扫描中…")
-            rep = scanner.scan(url, storage_state=storage_state, headless=True)
+            rep = _scan_with_timeout(url, storage_state)
             cfg = scanner.to_config(rep, name=name)
             cfg = P.inject_login(cfg, proj)
             dest.parent.mkdir(parents=True, exist_ok=True)
@@ -104,13 +138,8 @@ def run_selected(dir_name: str, out_dir: str,
     results: List[PageResult] = []
 
     with sync_playwright() as pw:
-        browser = pw.chromium.launch(
-            headless=True,
-            args=["--disable-blink-features=AutomationControlled",
-                  "--no-sandbox", "--disable-dev-shm-usage"])
-        ctx_args = {"viewport": {"width": 1600, "height": 900},
-                    "accept_downloads": True, "locale": "zh-CN",
-                    "ignore_https_errors": True}
+        browser = B.launch(pw, headless=True)
+        ctx_args = B.context_args(accept_downloads=True)
         state = valid_storage_state(storage_state, on_log)
         if state:
             ctx_args["storage_state"] = state

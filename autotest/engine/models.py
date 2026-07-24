@@ -47,7 +47,7 @@ class PageConfig:
     cases: List[Case] = field(default_factory=list)
     variables: Dict[str, Any] = field(default_factory=dict)
     list_api: Optional[str] = None          # 列表接口 URL 片段，用于等待响应
-    export_mode: str = "direct"             # direct | async
+    export_mode: str = "auto"               # direct | async | auto
     export_task_api: Optional[str] = None
     login: Dict[str, Any] = field(default_factory=dict)   # UI 自动登录配置
 

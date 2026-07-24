@@ -12,6 +12,7 @@ from typing import Any, Dict, List, Optional
 import yaml
 from playwright.sync_api import sync_playwright, Page
 
+from . import browser as B
 from .actions import REGISTRY, AssertionFailed
 from .login import LoginError, ensure_logged_in, is_login_page, load_dotenv
 from .adapters.element_ui import ElementUIAdapter
@@ -191,10 +192,8 @@ def run_page(config: PageConfig, out_dir: str, headless: bool = True,
     result = PageResult(config.name, config.url)
 
     with sync_playwright() as pw:
-        browser = pw.chromium.launch(headless=headless, slow_mo=slow_mo,
-                                     args=["--disable-blink-features=AutomationControlled","--no-sandbox","--disable-dev-shm-usage"])
-        ctx_args = {"viewport": {"width": 1600, "height": 900},
-                    "accept_downloads": True, "locale": "zh-CN"}
+        browser = B.launch(pw, headless=headless, slow_mo=slow_mo)
+        ctx_args = B.context_args(accept_downloads=True)
         state = valid_storage_state(storage_state)
         if state:
             ctx_args["storage_state"] = state

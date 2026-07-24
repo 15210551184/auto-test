@@ -92,11 +92,13 @@ button.danger:hover:not(:disabled){background:#fdeced}
 .term .l-warn{color:#f0b45e} .term .l-dim{color:#6b7686} .term .l-head{color:#7fb0ff}
 .term .empty{color:#5e6a7a;font-style:italic}
 .term-foot{border-top:1px solid #252c36;padding:9px 15px;display:flex;align-items:center;
-  gap:10px;font-size:12px;color:#7d8899}
+  gap:10px;font-size:12px;color:#7d8899;position:sticky;bottom:0;background:var(--term-bg);
+  box-shadow:0 -8px 12px -8px rgba(0,0,0,.4)}
 .term-foot label{margin:0;color:#7d8899;display:flex;align-items:center;gap:5px;font-size:12px}
 .term-foot .right{margin-left:auto;display:flex;gap:8px}
 .term-foot button{background:transparent;border-color:#333c48;color:#9aa6b5;padding:5px 10px;font-size:12px}
 .term-foot button:hover:not(:disabled){background:#1c222b}
+#btnStop:not(:disabled){color:#ff7b85;border-color:#6b2c33;background:#2a1518}
 table{width:100%;border-collapse:collapse;font-size:13px}
 th{text-align:left;padding:8px 15px;font-size:11px;font-weight:600;letter-spacing:.06em;
   text-transform:uppercase;color:var(--ink-3);border-bottom:1px solid var(--line)}
