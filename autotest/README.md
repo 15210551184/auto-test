@@ -27,6 +27,8 @@ docker compose up -d --build     # 或 python server.py
 执行过程日志实时推送，能看到跑到第几条用例，不是黑盒等待。
 关掉页面任务照常跑，重新打开会接上。
 
+控制台自己有一道登录（`.env` 里配 `WEB_USER`/`WEB_PASS`），没登录会跳转到登录页，不配的话默认放行——部署到公网服务器前务必配置，详见下面的部署文档。
+
 详细部署步骤见 [DEPLOY_DOCKER.md](DEPLOY_DOCKER.md)（通用服务器 Docker 部署）
 和 [DEPLOY_1PANEL.md](DEPLOY_1PANEL.md)（1Panel 面板部署，容器编排 + 网站反代）。
 

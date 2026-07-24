@@ -18,8 +18,10 @@ import threading
 import time
 from datetime import datetime
 from pathlib import Path
+from urllib.parse import quote
 
-from flask import Flask, Response, jsonify, request, send_from_directory
+from flask import (Flask, Response, jsonify, redirect, render_template_string,
+                    request, send_from_directory, session)
 
 from engine import project as P
 from engine.login import load_dotenv
@@ -32,27 +34,63 @@ PY = sys.executable
 load_dotenv(str(ROOT / ".env"))
 WEB_USER = os.environ.get("WEB_USER", "")
 WEB_PASS = os.environ.get("WEB_PASS", "")
+LOGIN_PAGE = (ROOT / "web" / "login.html").read_text(encoding="utf-8")
 
 app = Flask(__name__, static_folder=None)
+# 会话签名密钥。没配 SECRET_KEY 就每次启动随机生成——重启后需要重新登录，
+# 换来不用额外管一份密钥文件，对这种内部工具够用。
+app.secret_key = os.environ.get("SECRET_KEY") or secrets.token_hex(32)
+
+
+def _safe_next(path):
+    """只允许跳回本站内的相对路径，防止 next 参数被用来做开放重定向"""
+    if path and path.startswith("/") and not path.startswith("//") and "://" not in path:
+        return path
+    return "/"
 
 
 @app.before_request
 def _require_login():
     """
-    控制台自身的访问口令（跟被测系统的登录是两回事）。
+    控制台自身的登录口令（跟被测系统的登录是两回事）。
     没配 WEB_USER/WEB_PASS 就放行，方便本地临时跑一下；
     部署到公网服务器必须在 .env 里配好，否则任何人打开端口就能操作。
     """
     if not WEB_USER or not WEB_PASS:
         return None
-    auth = request.authorization
-    ok = (auth and secrets.compare_digest(auth.username, WEB_USER)
-          and secrets.compare_digest(auth.password, WEB_PASS))
-    if not ok:
-        return Response(
-            "需要登录", 401,
-            {"WWW-Authenticate": 'Basic realm="autotest"'})
-    return None
+    if request.path in ("/login", "/logout"):
+        return None
+    if session.get("authed"):
+        return None
+    if request.path.startswith("/api/"):
+        return jsonify({"ok": False, "msg": "未登录"}), 401
+    return redirect(f"/login?next={quote(request.path, safe='')}")
+
+
+@app.get("/login")
+def login_page():
+    nxt = _safe_next(request.args.get("next"))
+    if not WEB_USER or not WEB_PASS or session.get("authed"):
+        return redirect(nxt)
+    return render_template_string(LOGIN_PAGE, error=None, next=nxt)
+
+
+@app.post("/login")
+def login_submit():
+    nxt = _safe_next(request.form.get("next"))
+    if not WEB_USER or not WEB_PASS:
+        return redirect(nxt)
+    u, p = request.form.get("username", ""), request.form.get("password", "")
+    if secrets.compare_digest(u, WEB_USER) and secrets.compare_digest(p, WEB_PASS):
+        session["authed"] = True
+        return redirect(nxt)
+    return render_template_string(LOGIN_PAGE, error="账号或密码错误", next=nxt), 401
+
+
+@app.get("/logout")
+def logout():
+    session.pop("authed", None)
+    return redirect("/login")
 
 
 # ---------- 任务状态 ----------
