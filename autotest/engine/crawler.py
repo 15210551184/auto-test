@@ -19,6 +19,7 @@ from urllib.parse import urlparse
 from playwright.sync_api import Page, sync_playwright
 
 from .login import ensure_logged_in, is_login_page
+from .state import save_storage_state, valid_storage_state
 
 # 常见的侧边菜单容器，按可靠性排序
 MENU_CONTAINERS = [
@@ -53,32 +54,84 @@ def _text(loc) -> str:
         return ""
 
 
-def _expand_all(page: Page, rounds: int = 4) -> None:
-    """
-    反复点开所有折叠的父菜单。
-    多轮是因为展开一级后可能露出新的二级折叠项。
-    """
-    for _ in range(rounds):
-        opened = 0
+def _progress(callback, message: str) -> None:
+    if callback:
+        callback(message)
+
+
+def _collect_visible_leaves(page: Page, leaves: List[Dict], seen: Set[str]) -> int:
+    """收集当前展开分支的叶子菜单。"""
+    added = 0
+    for sel in LEAF_SELECTORS:
+        items = page.locator(sel)
+        for i in range(items.count()):
+            item = items.nth(i)
+            try:
+                if not item.is_visible():
+                    continue
+            except Exception:
+                continue
+            name, group = _text(item), _menu_path(item)
+            key = f"{group}\0{name}"
+            if not name or key in seen or any(k in name for k in SKIP_KEYWORDS):
+                continue
+            seen.add(key)
+            leaves.append({"name": name, "group": group})
+            added += 1
+        if added:
+            break
+    return added
+
+
+def _collect_all_leaves(page: Page, on_progress=None) -> List[Dict]:
+    """逐个打开分支并立即采集，兼容手风琴菜单。"""
+    leaves: List[Dict] = []
+    seen_leaves: Set[str] = set()
+    opened: Set[str] = set()
+    _collect_visible_leaves(page, leaves, seen_leaves)
+    while True:
+        candidate = None
         for sel in SUBMENU_SELECTORS:
             titles = page.locator(sel)
             for i in range(titles.count()):
-                t = titles.nth(i)
+                title = titles.nth(i)
                 try:
-                    if not t.is_visible():
-                        continue
-                    # 已展开的跳过，避免点了又收起
-                    parent = t.locator("xpath=..")
-                    cls = (parent.get_attribute("class") or "")
-                    if "opened" in cls or "is-opened" in cls or "ant-menu-submenu-open" in cls:
-                        continue
-                    t.click(timeout=2000)
-                    opened += 1
-                    page.wait_for_timeout(180)
+                    name = _text(title)
+                    if title.is_visible() and name and name not in opened:
+                        candidate = (title, name)
+                        break
                 except Exception:
                     continue
-        if opened == 0:
-            break
+            if candidate:
+                break
+        if not candidate:
+            return leaves
+        title, name = candidate
+        opened.add(name)
+        _progress(on_progress, f"展开菜单 {len(opened)}：{name}")
+        try:
+            title.click(timeout=3000)
+            page.wait_for_timeout(250)
+            added = _collect_visible_leaves(page, leaves, seen_leaves)
+            _progress(on_progress, f"  已发现 {len(leaves)} 个页面" + (f"（本分支新增 {added}）" if added else ""))
+        except Exception as exc:
+            _progress(on_progress, f"  跳过菜单 {name}：{type(exc).__name__}")
+
+
+def _open_menu_path(page: Page, group: str) -> None:
+    """在重新加载首页后按层级重新展开目标叶子所在的分支。"""
+    for name in filter(None, group.split(" / ")):
+        title = page.locator(",".join(SUBMENU_SELECTORS)).filter(
+            has_text=re.compile(rf"^\s*{re.escape(name)}\s*$"))
+        for i in range(title.count()):
+            item = title.nth(i)
+            try:
+                if item.is_visible():
+                    item.click(timeout=3000)
+                    page.wait_for_timeout(220)
+                    break
+            except Exception:
+                continue
 
 
 def _menu_path(leaf) -> str:
@@ -102,7 +155,7 @@ def _menu_path(leaf) -> str:
 
 
 def crawl_menu(page: Page, home_url: str, max_pages: int = 60,
-               probe: bool = True) -> List[Dict]:
+               probe: bool = True, on_progress=None) -> List[Dict]:
     """
     爬取菜单，返回页面列表。
 
@@ -112,29 +165,8 @@ def crawl_menu(page: Page, home_url: str, max_pages: int = 60,
     """
     page.goto(home_url, wait_until="domcontentloaded", timeout=60000)
     page.wait_for_timeout(2000)
-    _expand_all(page)
-
-    # 收集叶子菜单的文本和层级
-    leaves = []
-    seen_text: Set[str] = set()
-    for sel in LEAF_SELECTORS:
-        items = page.locator(sel)
-        for i in range(items.count()):
-            it = items.nth(i)
-            try:
-                if not it.is_visible():
-                    continue
-            except Exception:
-                continue
-            name = _text(it)
-            if not name or name in seen_text:
-                continue
-            if any(k in name for k in SKIP_KEYWORDS):
-                continue
-            seen_text.add(name)
-            leaves.append({"name": name, "group": _menu_path(it)})
-        if leaves:
-            break   # 第一个匹配到的选择器就是这套 UI 的，不用再试别的
+    leaves = _collect_all_leaves(page, on_progress)
+    _progress(on_progress, f"菜单收集完成，共 {len(leaves)} 个候选页面；开始逐页探测")
 
     if not probe:
         return [dict(l, url="", has_table=None) for l in leaves][:max_pages]
@@ -142,12 +174,13 @@ def crawl_menu(page: Page, home_url: str, max_pages: int = 60,
     # 逐个点击，记录 URL
     out = []
     seen_url: Set[str] = set()
-    for leaf in leaves[:max_pages]:
+    for index, leaf in enumerate(leaves[:max_pages], 1):
         name = leaf["name"]
+        _progress(on_progress, f"探测页面 {index}/{min(len(leaves), max_pages)}：{name}")
         try:
             page.goto(home_url, wait_until="domcontentloaded", timeout=30000)
             page.wait_for_timeout(900)
-            _expand_all(page, rounds=3)
+            _open_menu_path(page, leaf["group"])
 
             target = page.locator(
                 f"{','.join(LEAF_SELECTORS)}"
@@ -155,6 +188,7 @@ def crawl_menu(page: Page, home_url: str, max_pages: int = 60,
             if target.count() == 0:
                 target = page.get_by_text(name, exact=True)
             if target.count() == 0:
+                _progress(on_progress, "  跳过：找不到菜单项")
                 continue
 
             before = page.url
@@ -174,12 +208,15 @@ def crawl_menu(page: Page, home_url: str, max_pages: int = 60,
                     active = False
                 # 起始页本身也算数：首轮进来时 URL 就等于目标页
                 if not active and before.rstrip("/") != home_url.rstrip("/"):
+                    _progress(on_progress, "  跳过：菜单未跳转")
                     continue
             if is_login_page(page):
+                _progress(on_progress, "  跳过：会话已回到登录页")
                 continue
             # 去掉 hash 里的随机参数，避免同一页面重复
             key = url.split("?")[0]
             if key in seen_url:
+                _progress(on_progress, "  跳过：与已发现页面 URL 重复")
                 continue
             seen_url.add(key)
 
@@ -190,7 +227,9 @@ def crawl_menu(page: Page, home_url: str, max_pages: int = 60,
                 "url": url,
                 **info,
             })
-        except Exception:
+            _progress(on_progress, f"  完成：已保留 {len(out)} 个页面")
+        except Exception as exc:
+            _progress(on_progress, f"  跳过：{type(exc).__name__}")
             continue
 
     return out
@@ -242,33 +281,32 @@ def discover(home_url: str, login_cfg: Optional[dict] = None,
              max_pages: int = 60, probe: bool = True,
              on_progress=None) -> List[Dict]:
     """对外入口：登录 → 爬菜单 → 返回页面列表"""
-    import os
-
     with sync_playwright() as pw:
         browser = pw.chromium.launch(
             headless=True,
             args=["--no-sandbox", "--disable-dev-shm-usage"])
         args = {"viewport": {"width": 1600, "height": 900},
                 "locale": "zh-CN", "ignore_https_errors": True}
-        if storage_state and os.path.exists(storage_state):
-            args["storage_state"] = storage_state
+        state = valid_storage_state(storage_state, on_progress)
+        if state:
+            args["storage_state"] = state
         bctx = browser.new_context(**args)
         bctx.set_default_timeout(20000)
         page = bctx.new_page()
 
         if login_cfg:
             did = ensure_logged_in(page, home_url, login_cfg)
-            if did and storage_state:
-                bctx.storage_state(path=storage_state)
+            if did:
+                save_storage_state(bctx, storage_state, on_progress)
             if on_progress:
                 on_progress("已重新登录" if did else "复用已有登录态")
 
         if on_progress:
-            on_progress("正在展开菜单…")
-        pages = crawl_menu(page, home_url, max_pages=max_pages, probe=probe)
+            on_progress("正在逐分支展开菜单…")
+        pages = crawl_menu(page, home_url, max_pages=max_pages, probe=probe,
+                           on_progress=on_progress)
 
-        if storage_state:
-            bctx.storage_state(path=storage_state)
+        save_storage_state(bctx, storage_state, on_progress)
         browser.close()
 
     return pages

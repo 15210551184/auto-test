@@ -12,8 +12,9 @@
    cd /opt
    git clone <你的仓库地址> autotest
    cd autotest
-   cp .env.example .env
-   vi .env
+   mkdir -p runtime
+   cp .env.example runtime/.env
+   vi runtime/.env
    # AUTOTEST_USER / AUTOTEST_PASS —— 被测系统的登录账号
    # WEB_USER / WEB_PASS          —— 控制台自己的访问口令，务必配置，
    #                                  不配的话任何人拿到地址都能操作
@@ -54,11 +55,11 @@
 
 ## 四、数据持久化 / 查看数据
 
-`docker-compose.yml` 里挂载的 `configs/`、`projects/`、`reports/`、`.env`、`auth.json` 都在宿主机的项目目录下，直接用 1Panel「**文件**」功能就能浏览、编辑、下载报告文件，不需要进容器。
+`docker-compose.yml` 里挂载的 `configs/`、`projects/`、`reports/`、`runtime/`、`auth/` 都在宿主机的项目目录下，直接用 1Panel「**文件**」功能就能浏览、编辑、下载报告文件，不需要进容器。
 
 **`projects/` 这个目录尤其重要**——新建的系统、扫描出的菜单、勾选测哪些页面，都存在这里面。如果编排里漏挂载了它（比如手改过 `docker-compose.yml`），每次点「重新构建」都会把这些数据清空，页面上看起来就是"每次进来都是全新的"。确认方法：在「文件」里打开 `/opt/autotest/projects`，里面应该能看到你建过的系统目录；再进容器「终端」看 `/app/projects` 内容是不是一样，一样就说明挂载对了。
 
-## 五、验证码场景传 auth.json
+## 五、验证码场景传 auth/state.json
 
 如果目标系统登录页有验证码，先在本地电脑跑：
 
@@ -66,7 +67,7 @@
 python cli.py login <登录页地址>
 ```
 
-生成的 `auth.json` 直接用 1Panel「**文件**」的上传功能，上传覆盖到项目目录下的 `auth.json` 即可，不用重启容器（下次执行会自动读取新的登录态）。
+生成的 `auth/state.json` 直接用 1Panel「**文件**」的上传功能，上传覆盖到项目目录下的 `auth/state.json` 即可，不用重启容器（下次执行会自动读取新的登录态）。
 
 ## 六、更新
 

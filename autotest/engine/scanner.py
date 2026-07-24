@@ -16,6 +16,7 @@ from urllib.parse import urlparse
 
 import yaml
 from playwright.sync_api import sync_playwright, Page
+from .state import valid_storage_state
 
 
 class PageScanner:
@@ -150,8 +151,9 @@ def scan(url: str, storage_state: Optional[str] = None,
     with sync_playwright() as pw:
         browser = pw.chromium.launch(headless=headless)
         args = {"viewport": {"width": 1600, "height": 900}, "locale": "zh-CN"}
-        if storage_state and os.path.exists(storage_state):
-            args["storage_state"] = storage_state
+        state = valid_storage_state(storage_state)
+        if state:
+            args["storage_state"] = state
         bctx = browser.new_context(**args)
         page = bctx.new_page()
         sc = PageScanner(page)

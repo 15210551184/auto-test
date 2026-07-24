@@ -10,8 +10,8 @@ services:
       - ./configs:/app/configs      # 配置改了不用重新 build
       - ./projects:/app/projects    # 系统/菜单/勾选状态，没挂载的话重建容器就清空
       - ./reports:/app/reports      # 报告留在宿主机
-      - ./.env:/app/.env:ro
-      - ./auth.json:/app/auth.json  # 登录态持久化，容器重启不用重登
+      - ./runtime:/app/runtime      # 配置目录；首次启动不会把缺失 .env 误建成目录
+      - ./auth:/app/auth            # 目录挂载；首次启动不会把登录态误建成目录
     environment:
       - TZ=Asia/Shanghai
     shm_size: '1gb'                 # Chromium 需要，否则大页面会崩

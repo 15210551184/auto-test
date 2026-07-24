@@ -1,5 +1,6 @@
 .env
-auth.json
+runtime/
+auth/
 reports/
 __pycache__/
 *.pyc

@@ -31,7 +31,7 @@ CONFIG_DIR = ROOT / "configs"
 REPORT_DIR = ROOT / "reports"
 PY = sys.executable
 
-load_dotenv(str(ROOT / ".env"))
+load_dotenv(str(ROOT / "runtime" / ".env"))
 WEB_USER = os.environ.get("WEB_USER", "")
 WEB_PASS = os.environ.get("WEB_PASS", "")
 LOGIN_PAGE = (ROOT / "web" / "login.html").read_text(encoding="utf-8")

@@ -38,8 +38,8 @@ docker compose up -d --build     # 或 python server.py
 pip install playwright pyyaml pandas openpyxl
 playwright install chromium
 
-# 1. 配置账号密码（复制 .env.example 成 .env 填写）
-cp .env.example .env && vi .env
+# 1. 可选：配置账号密码（未配置也可直接启动）
+mkdir -p runtime && cp .env.example runtime/.env && vi runtime/.env
 
 # 2. 验证能否登录
 python cli.py test-login configs/order_list.yaml
@@ -151,8 +151,8 @@ engine/
 
 配置里的 `login` 段启用 UI 自动登录：程序打开登录页、填账号密码、点按钮。
 
-**密码放 `.env`，不要写进 yaml**（yaml 要进 git）。配置里用 `${env:AUTOTEST_PASS}` 引用。
-`.env` 和 `auth.json` 已在 `.gitignore` 里。
+**密码放 `runtime/.env`，不要写进 yaml**（yaml 要进 git）。配置里用 `${env:AUTOTEST_PASS}` 引用。
+`runtime/` 和 `auth/` 登录态目录已在 `.gitignore` 里。
 
 **懒登录**：每次执行先用已存的 cookie 试目标页，失效了才真正登录。
 这样一天可能只登一次，不会在业务系统里堆登录日志或触发异地登录风控。
@@ -163,7 +163,7 @@ engine/
 
 **有验证码就用不了**。程序会提前识别图形验证码、滑块、短信验证码并直接报错，
 不会让你干等超时。这种情况回退到本地登录：在有图形界面的机器上跑
-`python cli.py login <url>`，把生成的 `auth.json` 传到服务器。
+`python cli.py login <url>`，把生成的 `auth/state.json` 传到服务器同一路径。
 
 密码错误时会把登录页上的真实提示读出来（如"账号或密码错误"），
 而不是笼统的登录超时。

@@ -19,6 +19,7 @@ from . import scanner
 from .login import LoginError, ensure_logged_in, is_login_page
 from .models import CaseResult, PageResult, Status
 from .runner import DEFAULT_SELECTORS, Context, load_config, run_case
+from .state import save_storage_state, valid_storage_state
 
 
 def _log(cb, msg):
@@ -110,8 +111,9 @@ def run_selected(dir_name: str, out_dir: str,
         ctx_args = {"viewport": {"width": 1600, "height": 900},
                     "accept_downloads": True, "locale": "zh-CN",
                     "ignore_https_errors": True}
-        if storage_state and os.path.exists(storage_state):
-            ctx_args["storage_state"] = storage_state
+        state = valid_storage_state(storage_state, on_log)
+        if state:
+            ctx_args["storage_state"] = state
         bctx = browser.new_context(**ctx_args)
         bctx.set_default_timeout(30000)
         page = bctx.new_page()
@@ -122,8 +124,8 @@ def run_selected(dir_name: str, out_dir: str,
             try:
                 did = ensure_logged_in(page, proj.get("home_url") or targets[0][1], login_cfg) \
                     if proj.get("home_url") else False
-                if did and storage_state:
-                    bctx.storage_state(path=storage_state)
+                if did:
+                    save_storage_state(bctx, storage_state, on_log)
                 _log(on_log, "  · 已重新登录" if did else "  · 复用已有登录态")
             except LoginError as e:
                 browser.close()
@@ -167,8 +169,7 @@ def run_selected(dir_name: str, out_dir: str,
             _log(on_log, f"  小计：通过 {pr.passed} / 失败 {pr.failed}")
             results.append(pr)
 
-        if storage_state:
-            bctx.storage_state(path=storage_state)
+        save_storage_state(bctx, storage_state, on_log)
         browser.close()
 
     total_p = sum(r.passed for r in results)

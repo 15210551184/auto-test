@@ -3,7 +3,7 @@
 自动化数据验证工具
 
 用法:
-  python cli.py login  <url> [--state auth.json]        人工登录一次，保存登录态
+  python cli.py login  <url> [--state auth/state.json]  人工登录一次，保存登录态
   python cli.py scan   <url> [-o configs/x.yaml]        扫描页面生成配置草稿
   python cli.py run    <config.yaml> [--headed]         执行验证
   python cli.py auto   <url>                            扫描 + 立即执行（一步到位）
@@ -22,9 +22,10 @@ from engine import batch, project as P
 from engine.crawler import discover
 from engine.login import load_dotenv
 from engine.runner import load_config, run_page, save_login_state
+from engine.state import save_storage_state, valid_storage_state
 
-# .env 里的账号密码。cron 环境读不到 shell 的 export，所以必须走文件。
-load_dotenv(".env")
+# runtime/.env 里的账号密码。cron 环境读不到 shell 的 export，所以必须走文件。
+load_dotenv("runtime/.env")
 
 
 def _outdir(tag: str) -> str:
@@ -72,14 +73,15 @@ def cmd_test_login(a):
         browser = pw.chromium.launch(headless=not a.headed,
                                      args=["--no-sandbox", "--disable-dev-shm-usage"])
         args = {"viewport": {"width": 1600, "height": 900}, "locale": "zh-CN"}
-        if os.path.exists(a.state):
-            args["storage_state"] = a.state
+        state = valid_storage_state(a.state, print)
+        if state:
+            args["storage_state"] = state
         bctx = browser.new_context(**args)
         page = bctx.new_page()
         try:
             did = ensure_logged_in(page, cfg.url, cfg.login)
             print("✓ 重新登录成功" if did else "✓ 已有登录态仍然有效")
-            bctx.storage_state(path=a.state)
+            save_storage_state(bctx, a.state, print)
             print(f"  当前地址: {page.url}")
             print(f"  登录态已保存: {a.state}")
         except LoginError as e:
@@ -162,7 +164,7 @@ def cmd_auto(a):
 
 def main():
     p = argparse.ArgumentParser(description="页面自动化数据验证工具")
-    p.add_argument("--state", default="auth.json", help="登录态文件")
+    p.add_argument("--state", default="auth/state.json", help="登录态文件")
     sub = p.add_subparsers(dest="cmd", required=True)
 
     s1 = sub.add_parser("login", help="人工登录并保存登录态")

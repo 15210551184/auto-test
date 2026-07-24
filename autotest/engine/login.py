@@ -124,7 +124,7 @@ def login(page: Page, login_url: str, username: str, password: str,
         raise LoginError(
             f"登录页有{cap}，无法自动登录。\n"
             f"请改用本地登录方式：在有图形界面的机器上执行 "
-            f"`python cli.py login <url>`，把生成的 auth.json 传到服务器。"
+            f"`python cli.py login <url>`，把生成的 auth/state.json 传到服务器。"
         )
 
     # --- 用户名 ---
@@ -280,7 +280,7 @@ def load_dotenv(path: str = ".env") -> None:
     cron 环境里读不到 shell 的 export，所以需要这个。
     已存在的环境变量优先，不覆盖。
     """
-    if not os.path.exists(path):
+    if not os.path.isfile(path):
         return
     for line in open(path, encoding="utf-8"):
         line = line.strip()

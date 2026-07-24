@@ -20,8 +20,9 @@ git clone <你的仓库地址>
 cd autotest
 
 # 2. 配置账号密码
-cp .env.example .env
-vi .env
+mkdir -p runtime
+cp .env.example runtime/.env
+vi runtime/.env
 # AUTOTEST_USER / AUTOTEST_PASS —— 被测系统的登录账号
 # WEB_USER / WEB_PASS          —— 控制台自己的访问口令，务必配置，
 #                                  不配的话任何人打开 5000 端口都能操作
@@ -50,8 +51,8 @@ docker compose logs -f autotest
 | `./configs`     | `/app/configs`     | 用例配置，改了不用重新 build             |
 | `./projects`    | `/app/projects`    | 系统/菜单/勾选状态——**漏挂载这个的话，每次 `--build` 重建容器，之前建的系统和勾选都会被清空**，因为这些数据只写在容器内部的可写层里 |
 | `./reports`     | `/app/reports`     | 执行报告                                 |
-| `./.env`        | `/app/.env`        | 账号密码 + 控制台口令（只读挂载）        |
-| `./auth.json`   | `/app/auth.json`   | 登录态缓存，容器重启不用重登             |
+| `./runtime`     | `/app/runtime`     | 账号密码 + 控制台口令目录                |
+| `./auth`        | `/app/auth`        | 登录态目录，容器重启不用重登             |
 
 ## 防火墙 / 安全组
 
@@ -73,8 +74,8 @@ docker run -d --name autotest \
   -v $(pwd)/configs:/app/configs \
   -v $(pwd)/projects:/app/projects \
   -v $(pwd)/reports:/app/reports \
-  -v $(pwd)/.env:/app/.env:ro \
-  -v $(pwd)/auth.json:/app/auth.json \
+  -v $(pwd)/runtime:/app/runtime \
+  -v $(pwd)/auth:/app/auth \
   -e TZ=Asia/Shanghai \
   --shm-size=1gb \
   --restart unless-stopped \
@@ -85,13 +86,13 @@ docker run -d --name autotest \
 
 ## 验证码 / 无法自动登录的场景
 
-如果目标系统登录页有验证码，容器里跑不了自动登录，需要在**有图形界面的机器**（比如你自己的电脑）上先手动登录一次生成 `auth.json`：
+如果目标系统登录页有验证码，容器里跑不了自动登录，需要在**有图形界面的机器**（比如你自己的电脑）上先手动登录一次生成 `auth/state.json`：
 
 ```bash
 python cli.py login <登录页地址>
 ```
 
-然后把生成的 `auth.json` 传到服务器项目目录覆盖同名文件（`scp`/`rsync` 均可），容器会直接复用这份登录态。
+然后把生成的 `auth/state.json` 传到服务器项目目录覆盖同名文件（`scp`/`rsync` 均可），容器会直接复用这份登录态。
 
 ## 升级
 
@@ -100,7 +101,7 @@ git pull
 docker compose up -d --build
 ```
 
-`configs/`、`projects/`、`reports/`、`.env`、`auth.json` 都在宿主机上，重新构建镜像不影响这些数据（前提是都按上面的表挂载了卷，尤其别漏了 `projects/`）。
+`configs/`、`projects/`、`reports/`、`.env`、`auth/` 都在宿主机上，重新构建镜像不影响这些数据（前提是都按上面的表挂载了卷，尤其别漏了 `projects/`）。
 
 ## 常用运维命令
 

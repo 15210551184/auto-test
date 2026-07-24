@@ -16,6 +16,7 @@ from .actions import REGISTRY, AssertionFailed
 from .login import LoginError, ensure_logged_in, is_login_page, load_dotenv
 from .adapters.element_ui import ElementUIAdapter
 from .models import Case, CaseResult, PageConfig, PageResult, Status, Step, StepResult
+from .state import save_storage_state, valid_storage_state
 
 DEFAULT_SELECTORS = {
     "table": ".el-table",
@@ -194,8 +195,9 @@ def run_page(config: PageConfig, out_dir: str, headless: bool = True,
                                      args=["--disable-blink-features=AutomationControlled","--no-sandbox","--disable-dev-shm-usage"])
         ctx_args = {"viewport": {"width": 1600, "height": 900},
                     "accept_downloads": True, "locale": "zh-CN"}
-        if storage_state and os.path.exists(storage_state):
-            ctx_args["storage_state"] = storage_state
+        state = valid_storage_state(storage_state)
+        if state:
+            ctx_args["storage_state"] = state
         bctx = browser.new_context(**ctx_args)
         bctx.set_default_timeout(30000)
         page = bctx.new_page()
@@ -208,7 +210,7 @@ def run_page(config: PageConfig, out_dir: str, headless: bool = True,
             try:
                 did = ensure_logged_in(page, config.url, config.login)
                 if did:
-                    bctx.storage_state(path=storage_state or "auth.json")
+                    save_storage_state(bctx, storage_state or "auth/state.json")
                     print("  · 已重新登录，登录态已保存")
                 else:
                     print("  · 复用已有登录态")
@@ -254,6 +256,6 @@ def save_login_state(url: str, state_path: str, wait_seconds: int = 180) -> None
         except EOFError:
             page.wait_for_timeout(wait_seconds * 1000)
         os.makedirs(os.path.dirname(state_path) or ".", exist_ok=True)
-        bctx.storage_state(path=state_path)
+        save_storage_state(bctx, state_path)
         print(f"登录态已保存到 {state_path}")
         browser.close()
