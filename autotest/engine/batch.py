@@ -1,14 +1,29 @@
 """
 批量执行：一次跑一个项目里勾选的多个页面。
 
-关键决策：**所有页面复用同一个浏览器会话**。
-之前每个配置单独 run_page 会各自启动浏览器、各自登录，
-10 个页面就要登 10 次。合并后只登一次，10 个页面串行跑完。
+关键决策：**所有 worker 复用同一份登录态，但各自起独立的浏览器进程并发跑**。
+之前每个配置单独 run_page 会各自启动浏览器、各自登录，10 个页面登 10 次；
+后来改成全部页面共用一个浏览器串行跑，登录只用 1 次，但页面之间完全排队，
+页面一多总耗时就很难看。
+
+现在的做法：先登录一次拿到 cookie（存成内存里的 dict），之后最多
+concurrency 个并发 worker 各自起一个完整的 sync_playwright() 会话（各自的
+Chromium 进程），加载同一份 cookie 跑不同页面——不是并发登录（很多系统会
+把老会话踢掉或触发风控），只是把已经建立好的会话复用到多个进程，跟同一
+账号在好几台设备上分别打开已登录的浏览器是一回事。
+
+**为什么每个 worker 要起独立浏览器进程，不能共用一个 browser 开多个 tab**：
+Playwright 的同步 API 不支持跨线程共享同一个 Playwright/Browser 实例——
+一个 sync_playwright() 上下文创建出的对象只能在创建它的那个线程里驱动，
+多线程各自调用同一个 browser 会出错。所以并发的代价是内存换成了"多开
+Chromium 进程"而不是"一个进程开多个 tab"，concurrency 调大之前务必确认
+服务器内存够用。
 """
 import os
 import threading
 import time
 import traceback
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Callable, Dict, List, Optional
 
@@ -28,6 +43,11 @@ from .state import save_storage_state, valid_storage_state
 # 逐个探测选项、页面本身卡死等）仍可能远超预期；真出现过一个带地图/大量级联
 # 下拉的页面把整批扫描拖死在原地、既不报错也不失败的情况。这里兜底一刀切断。
 SCAN_TIMEOUT_SEC = 150
+
+# 并发跑几个页面。开的 Chromium 标签页越多，服务器内存占用越高——这个项目
+# 之前特意把整个控制台限制成"同一时刻只跑一个任务"就是因为内存吃紧，2 是
+# 一个相对稳的默认值，服务器内存宽裕再考虑调大。
+DEFAULT_CONCURRENCY = 2
 
 
 def _log(cb, msg):
@@ -116,9 +136,14 @@ def scan_selected(dir_name: str, storage_state: Optional[str] = None,
 def run_selected(dir_name: str, out_dir: str,
                  storage_state: Optional[str] = None,
                  only_tags: Optional[List[str]] = None,
-                 on_log: Callable = None) -> List[PageResult]:
+                 on_log: Callable = None,
+                 concurrency: int = DEFAULT_CONCURRENCY) -> List[PageResult]:
     """
-    执行勾选的页面。所有页面共用一个浏览器上下文，只登录一次。
+    执行勾选的页面，最多 concurrency 个页面并发跑（见模块头部说明）。
+
+    每条日志都会带 [页面名] 前缀，前端按这个前缀把日志分到各页面自己的
+    标签页里——并发跑的时候几个页面的日志会交替出现，没有前缀会看不清
+    哪行是哪个页面的。
     """
     proj = P.load_project(dir_name)
     if not proj:
@@ -136,52 +161,75 @@ def run_selected(dir_name: str, out_dir: str,
     if not targets:
         raise ValueError("勾选的页面都还没有配置，请先执行「生成用例」")
 
-    _log(on_log, f"执行 {len(targets)} 个页面")
-    results: List[PageResult] = []
+    concurrency = max(1, min(concurrency, len(targets)))
+    _log(on_log, f"执行 {len(targets)} 个页面（并发 {concurrency}）")
 
+    base_ctx_args = B.context_args(accept_downloads=True)
+    state = valid_storage_state(storage_state, on_log)
+    if state:
+        base_ctx_args["storage_state"] = state
+
+    # 独立起一个一次性的 Playwright 会话专门用来登录、拿 cookie；这个 browser
+    # 用完即关，不会留给下面的并发 worker（同步 API 不能跨线程共享同一个
+    # browser，见模块头部说明）。
     with sync_playwright() as pw:
-        browser = B.launch(pw, headless=True)
-        ctx_args = B.context_args(accept_downloads=True)
-        state = valid_storage_state(storage_state, on_log)
-        if state:
-            ctx_args["storage_state"] = state
-        bctx = browser.new_context(**ctx_args)
-        bctx.set_default_timeout(30000)
-        page = bctx.new_page()
+        login_browser = B.launch(pw, headless=True)
+        login_bctx = login_browser.new_context(**base_ctx_args)
+        login_bctx.set_default_timeout(30000)
+        login_page = login_bctx.new_page()
 
-        # 只登录一次，后面所有页面复用
         login_cfg = proj.get("login")
         if login_cfg:
             try:
-                did = ensure_logged_in(page, proj.get("home_url") or targets[0][1], login_cfg) \
+                did = ensure_logged_in(login_page, proj.get("home_url") or str(targets[0][1]), login_cfg) \
                     if proj.get("home_url") else False
                 if did:
-                    save_storage_state(bctx, storage_state, on_log)
+                    save_storage_state(login_bctx, storage_state, on_log)
                 _log(on_log, "  · 已重新登录" if did else "  · 复用已有登录态")
             except LoginError as e:
-                browser.close()
+                login_browser.close()
                 _log(on_log, f"  ✗ 登录失败: {e}")
                 pr = PageResult("登录", proj.get("home_url", ""))
                 pr.cases.append(CaseResult("登录", Status.ERROR, error=str(e)))
                 return [pr]
+        # 登录后的 cookie 存成内存对象，每个并发 worker 各自的浏览器进程
+        # 加载它复用会话，不再重新走一遍登录流程
+        shared_state = login_bctx.storage_state()
+        login_browser.close()
 
-        done_p, done_f = 0, 0
-        for idx, (name, cfg_path) in enumerate(targets, 1):
-            t0 = time.time()
-            _log(on_log, f"\n[{idx}/{len(targets)}] {name}")
-            progress.emit(phase="run", page=idx, pages=len(targets), page_name=name,
-                          passed=done_p, failed=done_f)
-            try:
-                cfg = load_config(str(cfg_path))
-            except Exception as e:
-                _log(on_log, f"  ✗ 配置读取失败: {e}")
-                pr = PageResult(name, "")
-                pr.cases.append(CaseResult("配置", Status.ERROR, error=str(e)))
-                results.append(pr)
-                done_f += 1
-                continue
+    results: List[Optional[PageResult]] = [None] * len(targets)
+    lock = threading.Lock()
+    counters = {"done": 0, "passed": 0, "failed": 0}
 
-            page_out = os.path.join(out_dir, f"{idx:02d}_{P._safe(name)}")
+    def run_one(idx: int, name: str, cfg_path: Path) -> None:
+        tag = f"[{name}]"
+        t0 = time.time()
+        _log(on_log, f"\n{tag} 开始")
+        try:
+            cfg = load_config(str(cfg_path))
+        except Exception as e:
+            _log(on_log, f"{tag} ✗ 配置读取失败: {e}")
+            pr = PageResult(name, "")
+            pr.cases.append(CaseResult("配置", Status.ERROR, error=str(e)))
+            results[idx] = pr
+            with lock:
+                counters["done"] += 1
+                counters["failed"] += 1
+                progress.emit(phase="run", page=counters["done"], pages=len(targets),
+                              passed=counters["passed"], failed=counters["failed"])
+            return
+
+        # 每个 worker 线程独立起一个完整的 Playwright 会话（自己的 Chromium
+        # 进程），只共享上面登录拿到的 cookie（普通 dict，线程间只读安全）
+        with sync_playwright() as pw:
+            browser = B.launch(pw, headless=True)
+            worker_ctx_args = dict(base_ctx_args)
+            worker_ctx_args["storage_state"] = shared_state
+            worker_bctx = browser.new_context(**worker_ctx_args)
+            worker_bctx.set_default_timeout(30000)
+            page = worker_bctx.new_page()
+
+            page_out = os.path.join(out_dir, f"{idx + 1:02d}_{P._safe(name)}")
             os.makedirs(page_out, exist_ok=True)
             ctx = Context(page, cfg, page_out)
             pr = PageResult(cfg.name, cfg.url)
@@ -190,29 +238,35 @@ def run_selected(dir_name: str, out_dir: str,
             if only_tags:
                 cases = [c for c in cases if set(c.tags) & set(only_tags)]
 
-            for ci, case in enumerate(cases, 1):
+            for case in cases:
                 cr = run_case(ctx, case)
                 icon = {"pass": "✓", "warn": "⚠", "fail": "✗", "error": "!", "skip": "-"}[cr.status.value]
-                _log(on_log, f"  ▶ {case.name} ... {icon} ({cr.duration_ms}ms)")
-                if cr.status != Status.PASS:
+                _log(on_log, f"{tag} ▶ {case.name} ... {icon} ({cr.duration_ms}ms)")
+                if cr.status not in (Status.PASS, Status.WARN):
                     tail = cr.steps[-1].message if cr.steps else cr.error
                     if tail:
-                        _log(on_log, f"     └ {tail[:160]}")
+                        _log(on_log, f"{tag}    └ {tail[:160]}")
                 pr.cases.append(cr)
-                progress.emit(phase="run", page=idx, pages=len(targets), page_name=name,
-                              case=ci, cases=len(cases),
-                              passed=done_p + pr.passed, failed=done_f + pr.failed)
 
             pr.duration_ms = int((time.time() - t0) * 1000)
-            _log(on_log, f"  小计：通过 {pr.passed} / 失败 {pr.failed}")
-            results.append(pr)
-            done_p += pr.passed
-            done_f += pr.failed
+            _log(on_log, f"{tag} 小计：通过 {pr.passed} / 失败 {pr.failed}")
+            results[idx] = pr
+            browser.close()
 
-        save_storage_state(bctx, storage_state, on_log)
-        browser.close()
+        with lock:
+            counters["done"] += 1
+            counters["passed"] += pr.passed
+            counters["failed"] += pr.failed
+            progress.emit(phase="run", page=counters["done"], pages=len(targets),
+                          passed=counters["passed"], failed=counters["failed"])
 
-    total_p = sum(r.passed for r in results)
-    total_f = sum(r.failed for r in results)
-    _log(on_log, f"\n全部完成：{len(results)} 个页面，通过 {total_p} / 失败 {total_f}")
-    return results
+    with ThreadPoolExecutor(max_workers=concurrency) as ex:
+        futures = [ex.submit(run_one, i, name, path) for i, (name, path) in enumerate(targets)]
+        for f in as_completed(futures):
+            f.result()   # worker 内部没兜住的异常在这里重新抛出，不悄悄吞掉
+
+    final_results = [r for r in results if r is not None]
+    total_p = sum(r.passed for r in final_results)
+    total_f = sum(r.failed for r in final_results)
+    _log(on_log, f"\n全部完成：{len(final_results)} 个页面，通过 {total_p} / 失败 {total_f}")
+    return final_results

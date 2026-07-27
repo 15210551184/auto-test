@@ -125,7 +125,7 @@ def cmd_batch_run(a):
     """批量执行勾选的页面"""
     out = _outdir(P._safe(a.project))
     results = batch.run_selected(a.project, out, storage_state=a.state,
-                                 only_tags=a.tags)
+                                 only_tags=a.tags, concurrency=a.concurrency)
     path = R.render(results, os.path.join(out, "report.html"))
     R.render_json(results, os.path.join(out, "result.json"))
     print(f"报告: {os.path.abspath(path)}")
@@ -198,6 +198,8 @@ def main():
     s8 = sub.add_parser("batch-run", help="批量执行勾选页面")
     s8.add_argument("project")
     s8.add_argument("--tags", nargs="*")
+    s8.add_argument("--concurrency", type=int, default=batch.DEFAULT_CONCURRENCY,
+                    help=f"并发跑几个页面，默认 {batch.DEFAULT_CONCURRENCY}；开太多 Chromium 标签页吃内存，服务器紧张就别调大")
     s8.set_defaults(func=cmd_batch_run)
 
     s5 = sub.add_parser("test-login", help="只验证账号密码能否登录")
