@@ -140,6 +140,14 @@ a.open:hover{text-decoration:underline}
 .modal h3{margin:0;padding:15px 18px;font-size:14px;border-bottom:1px solid var(--line)}
 .modal .body{padding:16px 18px}
 .modal .foot{padding:12px 18px;border-top:1px solid var(--line);display:flex;gap:8px;justify-content:flex-end}
+.ex-case{border:1px solid var(--line);border-radius:6px;margin-bottom:12px;overflow:hidden}
+.ex-case:last-child{margin-bottom:0}
+.ex-case h4{margin:0;padding:9px 13px;font-size:13px;background:#fafbfc;
+  border-bottom:1px solid var(--line);display:flex;align-items:center;gap:8px}
+.ex-case.skip h4{color:var(--ink-3)}
+.ex-case ol{margin:0;padding:10px 13px 10px 30px;font-size:12.5px;line-height:1.8;color:var(--ink)}
+.ex-case ol li{margin-bottom:2px}
+.ex-skip-note{font-size:11px;color:#e37318;font-weight:400;margin-left:auto}
 #toast{position:fixed;bottom:22px;left:50%;transform:translateX(-50%) translateY(80px);
   background:var(--ink);color:#fff;padding:10px 18px;border-radius:6px;font-size:13px;
   opacity:0;transition:.25s;pointer-events:none;z-index:50;max-width:80vw}
@@ -250,6 +258,11 @@ a.open:hover{text-decoration:underline}
 </div>
 <div id="toast"></div>
 <div class="mask" id="yamlMask"><div class="modal" style="width:860px"><h3 id="yamlTitle">编辑 YAML</h3><div class="body"><textarea id="yamlText" spellcheck="false"></textarea></div><div class="foot"><button id="yamlCancel">取消</button><button class="primary" id="yamlSave">保存</button></div></div></div>
+<div class="mask" id="explainMask"><div class="modal" style="width:640px">
+  <h3 id="explainTitle">用例说明</h3>
+  <div class="body" id="explainBody" style="max-height:65vh;overflow:auto"></div>
+  <div class="foot"><button id="explainToYaml" class="link">改用 YAML 编辑</button><button id="explainClose">关闭</button></div>
+</div></div>
 <script>
 const $ = s => document.querySelector(s);
 const term = $('#term');
@@ -323,7 +336,7 @@ function renderTree(){
       h+='<label class="item lvl'+depth+' '+(p.selected?'':'off')+'" style="padding-left:'+(15+depth*16+18)+'px">'+
          '<input type="checkbox" data-i="'+i+'" '+(p.selected?'checked':'')+'>'+
          '<span class="nm">'+esc(p.name)+'</span>'+
-         '<span class="tags">'+tags.join('')+(p.has_config?'<button class="link sm" type="button" data-yaml="'+i+'">编辑 YAML</button>':'')+'<button class="danger sm" type="button" data-del="'+i+'">删除</button></span></label>';
+         '<span class="tags">'+tags.join('')+(p.has_config?'<button class="link sm" type="button" data-explain="'+i+'">查看说明</button><button class="link sm" type="button" data-yaml="'+i+'">编辑 YAML</button>':'')+'<button class="danger sm" type="button" data-del="'+i+'">删除</button></span></label>';
     });
   }
   tree.innerHTML=h;
@@ -354,8 +367,39 @@ function renderTree(){
       collapsedGroups.has(g)?collapsedGroups.delete(g):collapsedGroups.add(g);renderTree();};
   });
   tree.querySelectorAll('[data-yaml]').forEach(btn=>{btn.onclick=async e=>{e.preventDefault();e.stopPropagation();const p=pages[+btn.dataset.yaml],r=await get('/api/projects/'+encodeURIComponent(proj.dir)+'/pages/'+encodeURIComponent(p.name)+'/config');if(!r.ok)return toast(r.msg||'读取 YAML 失败',true);$('#yamlTitle').textContent='编辑 YAML · '+p.name;$('#yamlText').value=r.content;$('#yamlMask').classList.add('show');$('#yamlMask').dataset.i=btn.dataset.yaml;};});
+  tree.querySelectorAll('[data-explain]').forEach(btn=>{btn.onclick=async e=>{
+    e.preventDefault();e.stopPropagation();
+    const p=pages[+btn.dataset.explain];
+    $('#explainTitle').textContent='用例说明 · '+p.name;
+    $('#explainBody').innerHTML='<div class="empty-state">加载中…</div>';
+    $('#explainMask').classList.add('show');
+    $('#explainMask').dataset.i=btn.dataset.explain;
+    const r=await get('/api/projects/'+encodeURIComponent(proj.dir)+'/pages/'+encodeURIComponent(p.name)+'/explain');
+    if(!r.ok) return $('#explainBody').innerHTML='<div class="empty-state">'+esc(r.msg||'读取失败')+'</div>';
+    renderExplain(r);
+  };});
   updateCount();
 }
+function renderExplain(data){
+  if(!data.cases||!data.cases.length){
+    $('#explainBody').innerHTML='<div class="empty-state">这份配置里还没有用例。</div>';return;
+  }
+  let h='';
+  data.cases.forEach(c=>{
+    const tagHtml=(c.tags||[]).map(t=>'<span class="tag">'+esc(t)+'</span>').join('');
+    h+='<div class="ex-case'+(c.skip?' skip':'')+'"><h4>'+esc(c.name)+' '+tagHtml+
+       (c.skip?'<span class="ex-skip-note">⚠ 需要人工填完信息才会执行</span>':'')+'</h4>'+
+       '<ol>'+c.steps.map(s=>'<li>'+esc(s)+'</li>').join('')+'</ol></div>';
+  });
+  $('#explainBody').innerHTML=h;
+}
+$('#explainClose').onclick=()=>$('#explainMask').classList.remove('show');
+$('#explainMask').addEventListener('click',e=>{if(e.target===$('#explainMask'))$('#explainMask').classList.remove('show');});
+$('#explainToYaml').onclick=()=>{
+  const i=$('#explainMask').dataset.i;
+  $('#explainMask').classList.remove('show');
+  tree.querySelector('[data-yaml="'+i+'"]').click();
+};
 function updateCount(){
   const n=pages.filter(p=>p.selected).length;
   $('#pageCount').textContent=pages.length+' 个页面';

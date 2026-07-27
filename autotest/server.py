@@ -24,6 +24,7 @@ from flask import (Flask, Response, jsonify, redirect, render_template_string,
                     request, send_from_directory, session)
 
 from engine import project as P
+from engine.explain import explain_config
 from engine.login import load_dotenv
 
 ROOT = Path(__file__).parent.resolve()
@@ -532,6 +533,20 @@ def api_get_page_config(d, page):
     if not path.is_file():
         return jsonify({"ok": False, "msg": "该页面尚未生成用例"}), 404
     return jsonify({"ok": True, "content": path.read_text(encoding="utf-8")})
+
+
+@app.get("/api/projects/<d>/pages/<page>/explain")
+def api_explain_page_config(d, page):
+    """把这个页面的 YAML 用例翻译成人话，给不看代码的人核对用例内容。"""
+    path = P.page_config_path(d, page)
+    if not path.is_file():
+        return jsonify({"ok": False, "msg": "该页面尚未生成用例"}), 404
+    try:
+        import yaml
+        raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    except Exception as e:
+        return jsonify({"ok": False, "msg": f"YAML 解析失败: {e}"}), 400
+    return jsonify({"ok": True, **explain_config(raw)})
 
 
 @app.post("/api/projects/<d>/pages/<page>/config")
