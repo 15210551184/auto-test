@@ -253,10 +253,11 @@ def do_check_select_options(ctx, label: str = None, max_options: int = 6, **kw):
     for o in opts:
         base = len(ctx.console_errors)
         try:
-            ui.select(page, label, option=o)
+            picked = ui.select(page, label, option=o)
         except Exception as e:
             problems.append(f"选项 '{o}' 选择失败: {type(e).__name__}")
             continue
+        ctx.vars[f"selected_{label}"] = picked
         try:
             do_search(ctx)
         except Exception as e:
