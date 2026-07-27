@@ -22,7 +22,6 @@ Chromium 进程"而不是"一个进程开多个 tab"，concurrency 调大之前�
 import os
 import threading
 import time
-import traceback
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Callable, Dict, List, Optional
@@ -34,9 +33,9 @@ from . import browser as B
 from . import progress
 from . import project as P
 from . import scanner
-from .login import LoginError, ensure_logged_in, is_login_page
+from .login import LoginError, ensure_logged_in
 from .models import CaseResult, PageResult, Status
-from .runner import DEFAULT_SELECTORS, Context, load_config, run_case
+from .runner import Context, load_config, run_case
 from .state import save_storage_state, valid_storage_state
 
 # 单页扫描的硬超时。scanner.scan() 内部各步骤都有超时，但加总起来（多个下拉框

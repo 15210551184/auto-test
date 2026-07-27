@@ -9,7 +9,7 @@
 「动作名（参数原样打印）」，不好看但不会崩。
 """
 import re
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 from .models import Step
 

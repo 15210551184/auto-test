@@ -15,7 +15,7 @@ from playwright.sync_api import sync_playwright, Page
 from . import browser as B
 from . import progress
 from .actions import REGISTRY, AssertionFailed, AssertionWarning
-from .login import LoginError, ensure_logged_in, is_login_page, load_dotenv
+from .login import LoginError, ensure_logged_in, is_login_page
 from .adapters.element_ui import ElementUIAdapter
 from .models import Case, CaseResult, PageConfig, PageResult, Status, Step, StepResult
 from .state import save_storage_state, valid_storage_state

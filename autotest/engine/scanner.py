@@ -17,6 +17,7 @@ from urllib.parse import urlparse
 import yaml
 from playwright.sync_api import sync_playwright, Page
 from . import browser as B
+from .adapters.element_ui import ElementUIAdapter
 from .state import valid_storage_state
 
 
@@ -24,6 +25,7 @@ class PageScanner:
     def __init__(self, page: Page):
         self.page = page
         self.api_calls: List[str] = []
+        self._ui = ElementUIAdapter()   # 只借用它关弹窗，不复用别的运行期逻辑
         page.on("response", self._on_resp)
 
     def _on_resp(self, resp):
@@ -176,7 +178,9 @@ class PageScanner:
         try:
             fields = self._scan_dialog_fields(dialog)
         finally:
-            self._close_dialog(dialog)   # 扫失败也要关掉，否则挡住后面的扫描
+            # 扫失败也要关掉，否则挡住后面的扫描；复用适配器的关弹窗逻辑，
+            # 不在这里维护第二份（这里和运行期用的是同一套 Element UI 约定）
+            self._ui.close_dialog(self.page)
         return {"title": title, "fields": fields} if fields else {}
 
     def _scan_dialog_fields(self, dialog) -> List[Dict[str, Any]]:
@@ -247,24 +251,6 @@ class PageScanner:
             return [t.strip() for t in item.locator(sel).all_inner_texts() if t.strip()][:15]
         except Exception:
             return []
-
-    def _close_dialog(self, dialog) -> None:
-        """关弹窗。走「取消」而不是「确定」，扫描阶段绝不能提交任何数据。"""
-        for sel in ["button:has-text('取消')", ".el-dialog__headerbtn",
-                    ".el-drawer__close-btn"]:
-            try:
-                btn = dialog.locator(sel).first
-                if btn.count() and btn.is_visible():
-                    btn.click(timeout=2000)
-                    self.page.wait_for_timeout(400)
-                    return
-            except Exception:
-                continue
-        try:
-            self.page.keyboard.press("Escape")
-            self.page.wait_for_timeout(400)
-        except Exception:
-            pass
 
     # ---------- 表格识别 ----------
     def scan_table(self) -> Dict[str, Any]:

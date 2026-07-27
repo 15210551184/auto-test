@@ -3,7 +3,8 @@
 > 目标：给一个后台管理系统的页面地址，自动识别页面结构、生成验证用例、
 > 自动登录并执行，产出可读的报告。
 >
-> 版本：v1.0 ｜ 代码量约 2900 行 ｜ 状态：核心链路已跑通
+> 版本：v2.0 ｜ 代码量约 6200 行 ｜ 状态：第一期（列表/搜索/导出）+
+> 第二期（新增/修改/详情/删除闭环、状态流转）已跑通
 
 ---
 
@@ -64,18 +65,27 @@
 
 | 模块 | 行数 | 职责 |
 |---|---:|---|
-| `engine/actions.py` | 385 | 动作与断言注册表，29 个可用动作 |
-| `engine/scanner.py` | 341 | 打开页面识别结构，生成配置草稿 |
-| `server.py` | 295 | Web 控制台后端 |
+| `engine/actions.py` | 862 | 动作与断言注册表，36 个可用动作（含第二期 CRUD 闭环） |
+| `web/index.html` | 694 | Web 控制台前端 |
+| `server.py` | 616 | Web 控制台后端 |
+| `engine/scanner.py` | 634 | 打开页面识别结构 + 表单 Schema，生成配置草稿 |
+| `engine/adapters/element_ui.py` | 520 | Element UI 控件操作封装 |
+| `engine/crawler.py` | 462 | 菜单爬取 |
+| `engine/explain.py` | 351 | 把 YAML 用例翻译成人话，供不看代码的人核对 |
+| `engine/runner.py` | 301 | 执行编排、上下文、用例隔离、WARN 分级 |
 | `engine/login.py` | 291 | UI 自动登录、懒登录、验证码检测 |
-| `engine/runner.py` | 259 | 执行编排、上下文、用例隔离 |
-| `engine/adapters/element_ui.py` | 217 | Element UI 控件操作封装 |
+| `engine/batch.py` | 271 | 批量扫描/执行，并发跑多个页面 |
+| `cli.py` | 221 | 命令行入口 |
+| `engine/project.py` | 189 | 项目（登录信息 + 菜单地图）管理 |
 | `engine/export_verify.py` | 185 | 导出下载与 Excel 比对 |
-| `cli.py` | 161 | 命令行入口 |
+| `engine/datafactory.py` | 138 | 测试数据工厂：按字段类型生成合法值 |
 | `engine/normalize.py` | 141 | 值归一化与比较 |
-| `engine/report.py` | 107 | HTML / JSON 报告 |
-| `engine/models.py` | 88 | 数据结构定义 |
-| `web/index.html` | 425 | Web 控制台前端 |
+| `engine/report.py` | 112 | HTML / JSON 报告 |
+| `engine/models.py` | 89 | 数据结构定义（含 Status.WARN） |
+| `engine/browser.py` | 36 | 统一的 Chromium 启动参数 |
+| `engine/state.py` | 50 | 登录态文件的安全读写 |
+| `engine/progress.py` | 25 | 结构化执行进度上报 |
+| `engine/tz.py` | 25 | 统一北京时间 |
 
 ### 三条关键分层
 
@@ -555,9 +565,9 @@ upload 再判 input，不然上传字段会被当成文本框，自动填表时�
 
 ## 五、能力清单
 
-### 35 个可用动作
+### 36 个可用动作
 
-**动作类（19）**
+**动作类（20）**
 
 | 动作 | 用途 |
 |---|---|
@@ -579,6 +589,7 @@ upload 再判 input，不然上传字段会被当成文本框，自动填表时�
 | `create_and_verify` | 数据工厂生成值填表提交，验证列表数据一致（见 4.6） |
 | `edit_and_verify` | 改指定字段提交，验证列表已同步（见 4.6） |
 | `delete_and_verify` | 清理本次创建的记录，只删 auto_ 前缀数据（见 4.6） |
+| `toggle_status_and_verify` | 点状态切换按钮（设为失效等），验证状态列真的变了 |
 
 **断言类（16）**
 
@@ -712,15 +723,24 @@ python server.py
 
 ## 十、后续可做
 
-按投入产出比排序：
+**已完成**（原计划里的，不再重复排期）：配置编辑器（YAML 编辑 + 「查看说明」
+人话预览）、批量执行（含并发）、控制台鉴权（fail-closed + 限流）。
 
-1. **配置编辑器**：后端 `GET/POST /api/config/<name>` 已就绪，
-   前端加个带 YAML 语法校验的编辑器即可，不用再 SSH 改文件
-2. **批量执行**：一次跑多个配置，汇总成一份报告
-3. **定时任务纳入界面**：现在还是 crontab，可以做成页面上配置
+按投入产出比排序，剩下的：
+
+1. **字段级负向校验**：第二期做了"必填都报错""填对的能存对"，还没做
+   "长度超限/格式错误该被拦下"这类负向用例（`assert_input_maxlength` 之类）
+2. **跨页面场景层**：新的一层 YAML（场景），串联多个页面的用例、页面间
+   传变量——比如"国家管理新增一个国家，加盟商管理的国家下拉能选到它"。
+   见设计讨论：这是新增的一层，不是对现有页面配置的改造
+3. **权限维度**：模型标注 `roles`，配多账号后同一套用例换账号跑，验证
+   "该看到的看到、不该操作的操作不了"
 4. **趋势对比**：同一配置多次执行的通过率曲线，能看出是偶发还是持续失败
-5. **Ant Design 适配器**：如果有其他技术栈的系统
-6. **控制台鉴权**：简单的 Basic Auth 或 token 即可
+5. **定时任务纳入界面**：现在还是 crontab，可以做成页面上配置
+6. **Ant Design 完整适配器**：`scanner.scan_table()` 已经能兼容识别 Ant
+   Design 的表格，但表单扫描（`scan_form_schema`）、运行期适配器
+   （`element_ui.py`）都还是 Element UI 专用，要支持 Ant Design 系统
+   得照 `ElementUIAdapter` 的接口再写一个
 
 ---
 

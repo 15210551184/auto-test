@@ -344,9 +344,20 @@ function renderTree(){
   $('#selBar').style.display='flex';
   const groups={};
   pages.forEach((p,i)=>{const g=p.group||'未分组';(groups[g]=groups[g]||[]).push([p,i]);});
-  // 按路径字符串排序：父分组「系统管理」严格排在子分组「系统管理 / 日志管理」前面，
-  // 前缀关系在普通字符串比较下天然成立，子分组会紧跟在父分组后面，视觉上连成一块。
-  const groupKeys=Object.keys(groups).sort();
+  // 排序键是"顶层分组首次出现的位置"+"深度"+"自己首次出现的位置"，不是直接
+  // 按分组名字符串排序——那样会把顺序打乱成字典序，和真实系统菜单从上到下
+  // 的顺序对不上。深度这一档保证父分组标题永远排在它的子分组前面，不受
+  // "子分组的页面恰好比父分组自己的页面先出现在扫描结果里"这种情况影响。
+  const firstIndex={};
+  pages.forEach((p,i)=>{const g=p.group||'未分组';if(!(g in firstIndex))firstIndex[g]=i;});
+  const topOf=g=>g.split(' / ')[0];
+  const depthOf=g=>g.split(' / ').length-1;
+  const groupKeys=Object.keys(groups).sort((a,b)=>{
+    const ta=firstIndex[topOf(a)],tb=firstIndex[topOf(b)];
+    if(ta!==tb) return ta-tb;
+    const da=depthOf(a),db=depthOf(b);
+    return da!==db ? da-db : firstIndex[a]-firstIndex[b];
+  });
   let h='';
   for(const g of groupKeys){
     const folded=collapsedGroups.has(g);
