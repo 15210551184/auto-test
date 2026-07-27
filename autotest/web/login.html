@@ -23,25 +23,38 @@ input[type=text],input[type=password]{width:100%;padding:8px 10px;border:1px sol
 input:focus{outline:2px solid #b9cdf6;outline-offset:-1px;border-color:var(--busy)}
 .row{margin-bottom:14px}
 button{width:100%;font:500 13px/1 inherit;padding:10px 14px;border-radius:5px;cursor:pointer;
-  border:1px solid var(--busy);background:var(--busy);color:#fff}
-button:hover{background:#2a63d6}
-.err{font-size:12px;color:var(--fail);margin-bottom:14px}
+  border:1px solid var(--busy);background:var(--busy);color:#fff;transition:background .12s}
+button:hover:not(:disabled){background:#2a63d6}
+button:disabled{opacity:.6;cursor:not-allowed}
+.err{font-size:12px;color:var(--fail);margin-bottom:14px;padding:8px 10px;
+  background:#fdeced;border:1px solid #f6c9ce;border-radius:5px}
+.sub{font-size:12px;color:var(--ink-3);margin:-12px 0 20px}
 </style>
 </head>
 <body>
-  <form class="card" method="post" action="/login">
+  <form class="card" method="post" action="/login" id="loginForm">
     <h1>自动化数据验证控制台</h1>
+    <div class="sub">请使用管理员账号登录</div>
     {% if error %}<div class="err">{{ error }}</div>{% endif %}
     <input type="hidden" name="next" value="{{ next }}">
     <div class="row">
       <label>账号</label>
-      <input type="text" name="username" autofocus required>
+      <input type="text" name="username" autocomplete="username" autofocus required>
     </div>
     <div class="row">
       <label>密码</label>
-      <input type="password" name="password" required>
+      <input type="password" name="password" autocomplete="current-password" required>
     </div>
-    <button type="submit">登录</button>
+    <button type="submit" id="loginBtn">登录</button>
   </form>
+  <script>
+    // 提交后给按钮加载态，避免慢响应时看起来「点了没反应」
+    document.getElementById('loginForm').addEventListener('submit', function(){
+      var b = document.getElementById('loginBtn');
+      b.disabled = true; b.textContent = '登录中…';
+      // 兜底：3 秒后恢复，防止校验失败回填后按钮卡在禁用态
+      setTimeout(function(){ b.disabled = false; b.textContent = '登录'; }, 3000);
+    });
+  </script>
 </body>
 </html>
