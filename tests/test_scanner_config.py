@@ -201,6 +201,33 @@ class CrudConfigGenerationTests(unittest.TestCase):
         skel = next(c for c in cfg["cases"] if c["name"] == "新增数据（需补充字段）")
         self.assertTrue(skel["skip"])
 
+    def test_status_toggle_step_added_when_button_and_column_present(self):
+        report = self._report(
+            {"create": True, "delete": True, "status_toggle": True},
+            self._fields())
+        cfg = scanner.to_config(report)
+        loop = next(c for c in cfg["cases"] if c["name"] == "新增-修改-详情-删除完整闭环")
+        actions = [a for s in loop["steps"] for a in s.keys()]
+        self.assertIn("toggle_status_and_verify", actions)
+        # 必须排在 delete_and_verify 前面：清理之前先验证状态流转
+        self.assertLess(actions.index("toggle_status_and_verify"),
+                        actions.index("delete_and_verify"))
+
+    def test_status_toggle_skipped_without_status_column(self):
+        report = self._report({"create": True, "status_toggle": True}, self._fields())
+        report["table"]["headers"] = ["加盟商名称", "负责人"]   # 没有"状态"列
+        cfg = scanner.to_config(report)
+        loop = next(c for c in cfg["cases"] if c["name"] == "新增-修改-详情-删除完整闭环")
+        actions = [a for s in loop["steps"] for a in s.keys()]
+        self.assertNotIn("toggle_status_and_verify", actions)
+
+    def test_status_toggle_skipped_without_button(self):
+        report = self._report({"create": True}, self._fields())   # 没有 status_toggle 按钮
+        cfg = scanner.to_config(report)
+        loop = next(c for c in cfg["cases"] if c["name"] == "新增-修改-详情-删除完整闭环")
+        actions = [a for s in loop["steps"] for a in s.keys()]
+        self.assertNotIn("toggle_status_and_verify", actions)
+
     def test_no_create_button_generates_nothing_crud(self):
         report = self._report({}, [])
         report.pop("create_form")

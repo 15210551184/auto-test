@@ -822,3 +822,41 @@ def do_delete_and_verify(ctx, identity_column: str = None, action: str = "删除
     except LookupError:
         pass
     return f"清理完成：'{ident_val}' 已从列表移除 ✓"
+
+
+@action("toggle_status_and_verify")
+def do_toggle_status(ctx, column: str = "状态", action: str = None,
+                     identity_column: str = None, **kw):
+    """
+    状态流转验证：点行内的状态切换按钮（"设为失效"/"停用"这类，不同系统
+    措辞不一样，不给 action 就现场探测），断言状态列真的变了。
+
+    只在本次自动创建的记录上操作——铁律和 delete_and_verify 一样，
+    不是自动化数据一律拒绝，行为不由传参决定。
+    """
+    identity_column = identity_column or ctx.vars.get("created_identity_column")
+    ident_val = ctx.vars.get("created_identity")
+    if not identity_column or ident_val is None:
+        _fail("没有可用的记录定位信息，请先执行 create_and_verify")
+    if not DF.is_auto_data(ident_val):
+        _fail(f"'{ident_val}' 不像是自动化创建的数据，拒绝操作其状态")
+
+    row = ctx.ui.find_row_by(ctx.page, identity_column, ident_val)
+    before = ctx.ui.table_data(ctx.page)[row].get(column)
+
+    act = action or ctx.ui.find_row_toggle_text(ctx.page, row)
+    if not act:
+        _fail(f"第 {row + 1} 行没有找到状态切换按钮（列 '{column}'）")
+    ctx.ui.row_action(ctx.page, row, act)
+    if ctx.ui.dialog_visible(ctx.page):
+        try:
+            ctx.ui.confirm_dialog(ctx.page, ok=True)
+        except Exception:
+            pass
+    ctx.page.wait_for_timeout(600)
+
+    row2 = ctx.ui.find_row_by(ctx.page, identity_column, ident_val)
+    after = ctx.ui.table_data(ctx.page)[row2].get(column)
+    if before == after:
+        _fail(f"点击「{act}」后「{column}」列没有变化，仍是 '{after}'")
+    return f"状态切换通过：点「{act}」后「{column}」从 '{before}' 变为 '{after}' ✓"

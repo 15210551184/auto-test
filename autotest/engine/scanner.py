@@ -336,6 +336,7 @@ class PageScanner:
             "edit": has("编辑", "修改"),
             "delete": has("删除"),
             "detail": has("查看", "详情"),
+            "status_toggle": has("设为失效", "设为生效", "停用", "启用", "禁用", "冻结", "解冻"),
             "batch": has("批量"),
         }
 
@@ -544,6 +545,10 @@ def to_config(report: Dict[str, Any], name: Optional[str] = None) -> Dict[str, A
                     "fields": {edit_field["label"]: "${random}"}}})
         if btns.get("detail"):
             loop_steps.append({"assert_detail_matches": None})
+        if btns.get("status_toggle") and "状态" in headers:
+            # 只在表头真有"状态"这一列时才生成——没有就不知道验哪一列，
+            # 生成了也只会白白失败
+            loop_steps.append({"toggle_status_and_verify": {"column": "状态"}})
         if btns.get("delete"):
             loop_steps.append({"delete_and_verify": None})
 

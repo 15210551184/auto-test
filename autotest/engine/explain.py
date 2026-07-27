@@ -309,6 +309,12 @@ def _(p):
             "不是自动创建的会拒绝执行），检查列表里确实没了")
 
 
+@_tpl("toggle_status_and_verify")
+def _(p):
+    col = _p(p, "column", "状态")
+    return f"点这条记录的状态切换按钮（如「设为失效」），检查「{col}」列确实变了"
+
+
 def explain_step(step: Step) -> str:
     fn = _ACTIONS.get(step.action)
     if fn:

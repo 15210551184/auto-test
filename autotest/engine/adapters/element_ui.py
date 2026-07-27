@@ -246,6 +246,33 @@ class ElementUIAdapter:
                               f"定位不到唯一记录，不敢继续操作")
         return hits[0]
 
+    # 状态切换类按钮的常见文案。和 DESTRUCTIVE 不完全重叠——"设为生效"「启用」
+    # 「解冻」这些是把数据从"失效"切回"生效"，对巡检来说没有破坏性，但状态
+    # 流转验证需要知道这些文案，好在自己创建的测试记录上点它、验证状态真的变了。
+    STATUS_TOGGLE = ["设为失效", "设为生效", "停用", "启用", "禁用", "冻结", "解冻",
+                     "上架", "下架"]
+
+    def find_row_toggle_text(self, page: Page, row: int,
+                             table: str = ".el-table") -> Optional[str]:
+        """
+        找这一行操作列里状态切换按钮的具体文案。不同系统措辞不一样（"设为失效"
+        还是"停用"），运行时现场探测，配置里不需要写死具体文案。
+        """
+        rows = self.rows(page, table)
+        if rows.count() <= row:
+            return None
+        tr = rows.nth(row)
+        for kw in self.STATUS_TOGGLE:
+            try:
+                el = tr.locator(
+                    f"button:has-text('{kw}'), a:has-text('{kw}'), "
+                    f"span:has-text('{kw}'), .el-link:has-text('{kw}')").first
+                if el.count() and el.is_visible():
+                    return kw
+            except Exception:
+                continue
+        return None
+
     # ---------- 分页 ----------
     def total_count(self, page: Page) -> Optional[int]:
         """从 '共 1234 条' 里抠出总数"""

@@ -15,7 +15,7 @@ if "playwright.sync_api" not in sys.modules:
 from autotest.engine.actions import (AssertionFailed, as_detail_matches,
                                      as_form_errors, as_form_prefilled,
                                      do_create_and_verify, do_delete_and_verify,
-                                     do_edit_and_verify)
+                                     do_edit_and_verify, do_toggle_status)
 
 
 class FakeLocator:
@@ -52,7 +52,7 @@ class FakeUI:
     set_field_value / row_action 只记录调用，不真的操作 DOM。
     """
 
-    def __init__(self, table, dialog_values=None, message="操作成功"):
+    def __init__(self, table, dialog_values=None, message="操作成功", toggle_text="设为失效"):
         self.table = table
         self.dialog_values = dialog_values or {}
         self.message = message
@@ -61,6 +61,10 @@ class FakeUI:
         self.row_actions = []
         self.confirmed = None
         self._dialog_visible = False
+        self._toggle_text = toggle_text
+
+    def find_row_toggle_text(self, page, row):
+        return self._toggle_text
 
     def dialog(self, page):
         return FakeLocator()
@@ -304,6 +308,50 @@ class DetailMatchesTests(unittest.TestCase):
         ctx.vars["created_identity_column"] = "负责人"
         with self.assertRaises(AssertionFailed):
             as_detail_matches(ctx)
+
+
+class ToggleStatusTests(unittest.TestCase):
+    def test_status_actually_changing_passes(self):
+        row = {"负责人": "auto_a1", "状态": "生效"}
+        ctx = FakeCrudCtx(table=[row])
+        ctx.vars["created_identity"] = "auto_a1"
+        ctx.vars["created_identity_column"] = "负责人"
+
+        def fake_row_action(page, r, action):
+            ctx.ui.row_actions.append((r, action))
+            row["状态"] = "失效"   # 模拟点击后状态真的翻转了
+
+        ctx.ui.row_action = fake_row_action
+        msg = do_toggle_status(ctx)
+        self.assertIn("通过", msg)
+        self.assertEqual([(0, "设为失效")], ctx.ui.row_actions)
+
+    def test_status_not_changing_fails(self):
+        # 点了按钮但列没变——典型的"状态流转没生效"bug
+        row = {"负责人": "auto_a1", "状态": "生效"}
+        ctx = FakeCrudCtx(table=[row])
+        ctx.vars["created_identity"] = "auto_a1"
+        ctx.vars["created_identity_column"] = "负责人"
+        with self.assertRaises(AssertionFailed):
+            do_toggle_status(ctx)
+
+    def test_refuses_non_auto_data(self):
+        row = {"负责人": "张三", "状态": "生效"}
+        ctx = FakeCrudCtx(table=[row])
+        ctx.vars["created_identity"] = "张三"   # 没有 auto_ 前缀
+        ctx.vars["created_identity_column"] = "负责人"
+        with self.assertRaises(AssertionFailed):
+            do_toggle_status(ctx)
+        self.assertEqual([], ctx.ui.row_actions)
+
+    def test_no_toggle_button_found_fails_clearly(self):
+        row = {"负责人": "auto_a1", "状态": "生效"}
+        ctx = FakeCrudCtx(table=[row])
+        ctx.ui._toggle_text = None   # 这一行探测不到任何切换按钮
+        ctx.vars["created_identity"] = "auto_a1"
+        ctx.vars["created_identity_column"] = "负责人"
+        with self.assertRaises(AssertionFailed):
+            do_toggle_status(ctx)
 
 
 if __name__ == "__main__":
