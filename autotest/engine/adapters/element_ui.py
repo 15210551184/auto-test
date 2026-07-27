@@ -70,9 +70,12 @@ class ElementUIAdapter:
         下拉浮层挂在 body 下而不是 select 内部，且关闭后 DOM 仍保留（display:none），
         所以必须用 :visible 且取 .last，否则会点到上一次残留的浮层。
         返回实际选中的文本，供断言使用。
+
+        级联选择器（比如「城市」依赖「国家」先选）没选父级时是 disabled 的，
+        点击给个短超时——不然 Playwright 会一直重试等它变可点，默认能等 30s。
         """
         item = self._form_item(page, label)
-        item.locator(".el-select, .el-input").first.click()
+        item.locator(".el-select, .el-input").first.click(timeout=5000)
         page.wait_for_timeout(200)
 
         dropdown = page.locator(".el-select-dropdown:visible").last
@@ -95,7 +98,7 @@ class ElementUIAdapter:
     def list_options(self, page: Page, label: str) -> List[str]:
         """枚举下拉的所有选项，用于遍历筛选测试"""
         item = self._form_item(page, label)
-        item.locator(".el-select, .el-input").first.click()
+        item.locator(".el-select, .el-input").first.click(timeout=5000)
         page.wait_for_timeout(200)
         dropdown = page.locator(".el-select-dropdown:visible").last
         opts = dropdown.locator(".el-select-dropdown__item").all_inner_texts()

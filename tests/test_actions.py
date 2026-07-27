@@ -135,6 +135,19 @@ class CheckSelectOptionsTests(unittest.TestCase):
         self.assertIn("无可选项", msg)
         self.assertNotIn("selected_状态", ctx.vars)
 
+    def test_undisableable_cascading_select_skips_instead_of_erroring(self):
+        # 回归用例：级联选择器（如"城市"依赖"国家"先选）在父级没选时点不开，
+        # ui.list_options() 会抛异常（Playwright 点击 disabled 元素超时）。
+        # 这种情况应该优雅跳过，不能让整个 step 变成 ERROR 状态。
+        class RaisingUI(FakeSelectUI):
+            def list_options(self, page, label):
+                raise TimeoutError("locator.click: Timeout 5000ms exceeded")
+        ctx = FakeSearchCtx([])
+        ctx.ui = RaisingUI([])
+        msg = do_check_select_options(ctx, label="城市")
+        self.assertIn("打不开", msg)
+        self.assertNotIn("selected_城市", ctx.vars)
+
 
 class FakeSignalCtx:
     """带 console_errors/failed_requests 信号的假 ctx，用于测试严重程度降级。"""

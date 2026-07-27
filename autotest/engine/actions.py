@@ -270,8 +270,13 @@ def do_check_select_options(ctx, label: str = None, max_options: int = 6, **kw):
     循环结束后 ${selected_label} 停在最后一个选项，供后续列断言复用。
     """
     page, ui = ctx.page, ctx.ui
-    opts = [o for o in ui.list_options(page, label)
-            if o and o not in ("全部", "请选择", "不限")][:max_options]
+    try:
+        raw_opts = ui.list_options(page, label)
+    except Exception:
+        # 级联选择器（如「城市」依赖「国家」）在父级没选时点不开，属于正常情况
+        # （扫描阶段已经因为取不到选项而不会生成这条用例；这里是手写配置时的兜底）
+        return f"下拉 '{label}' 打不开（可能依赖其他字段先选），跳过"
+    opts = [o for o in raw_opts if o and o not in ("全部", "请选择", "不限")][:max_options]
     if not opts:
         return f"下拉 '{label}' 无可选项，跳过"
     problems = []

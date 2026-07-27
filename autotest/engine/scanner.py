@@ -62,8 +62,15 @@ class PageScanner:
         return fields
 
     def _peek_options(self, item) -> List[str]:
+        """
+        点开一个下拉看看有什么选项。级联选择器（比如「城市」依赖「国家」先选）
+        在没选父级之前是 disabled 的——Playwright 点一个 disabled 元素会一直
+        重试等它变成可点，默认要等 30s。一个表单里有几个这种级联下拉，扫描
+        单页就可能被拖到 150s 超时上限。这里给点击一个短超时，点不动就当没有
+        选项处理（本来也生成不出可用的筛选用例），别在一个下拉上死等半分钟。
+        """
         try:
-            item.locator(".el-select").first.click()
+            item.locator(".el-select").first.click(timeout=3000)
             self.page.wait_for_timeout(300)
             dd = self.page.locator(".el-select-dropdown:visible").last
             opts = [o.strip() for o in
