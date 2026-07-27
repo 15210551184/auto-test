@@ -283,6 +283,24 @@ else:
     kind = "text"
 ```
 
+**级联下拉**（如「城市」依赖「国家」先选，没选父级前是 disabled 的）：
+第一遍点不开、options 是空的下拉，会依次尝试先选前面某个下拉的第一个真实
+选项，等一下再重新探测——测出来了就记下"先选谁选的什么"（`depends_on`），
+生成用例时自动把这一步补在前面：
+
+```yaml
+- name: 筛选-城市（联动国家）
+  steps:
+  - select: {label: 国家, option: 中国}
+  - wait: 500
+  - check_select_options: {label: 城市}
+  - assert_column_all: {column: 城市, equals: "${selected_城市}"}
+```
+
+不这么处理的话，生成的「筛选-城市」用例执行时会在一个 disabled 的下拉上
+硬等到超时——和扫描阶段最初踩的坑一样。只探测"排在它前面"的下拉当父级，
+不做多级级联的穷举，够用但不完美。
+
 **② 识别表格**
 
 抓表头（只取 `.el-table__header-wrapper`，避免固定列产生的重复表头），

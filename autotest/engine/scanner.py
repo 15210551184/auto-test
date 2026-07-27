@@ -59,7 +59,67 @@ class PageScanner:
             else:
                 continue
             fields.append({"label": label, "type": kind, **extra})
+        self._resolve_cascading_selects(fields)
         return fields
+
+    def _form_item_by_label(self, label: str):
+        items = self.page.locator(".el-form-item")
+        for i in range(items.count()):
+            item = items.nth(i)
+            try:
+                lb = item.locator(".el-form-item__label").first.inner_text().strip()
+            except Exception:
+                continue
+            if lb.rstrip(":：").strip() == label:
+                return item
+        return None
+
+    def _resolve_cascading_selects(self, fields: List[Dict[str, Any]]) -> None:
+        """
+        级联下拉（如"城市"依赖"国家"先选）第一遍扫描是空的——不是没选项，
+        是控件在父级没选之前根本不可交互，_peek_options 点不开只能拿到 []。
+
+        这里依样画葫芦：对每个选项为空的下拉，依次尝试先选前面某个下拉的
+        第一个真实选项（排除"全部/请选择"这类占位项），等一下让级联接口
+        返回，再重新探测一次。测出来了就把"先选谁、选的什么"记进
+        depends_on，供 to_config() 在生成用例时补上这一步——不然测的时候
+        一样会点在一个 disabled 元素上。
+        只试"排在它前面的下拉"，不乱试后面的字段（表单里父级选择器通常在
+        依赖它的子级前面，这个假设足够覆盖常见情况，不做多级级联的穷举）。
+        """
+        placeholder = {"全部", "请选择", "不限"}
+        for i, f in enumerate(fields):
+            if f["type"] != "select" or f.get("options"):
+                continue
+            for parent in fields[:i]:
+                if parent["type"] != "select" or not parent.get("options"):
+                    continue
+                candidates = [o for o in parent["options"] if o not in placeholder]
+                if not candidates:
+                    continue
+                test_option = candidates[0]
+                try:
+                    self._select_option(parent["label"], test_option)
+                except Exception:
+                    continue
+                self.page.wait_for_timeout(500)   # 给级联接口留出返回时间
+                item = self._form_item_by_label(f["label"])
+                retry = self._peek_options(item) if item is not None else []
+                if retry:
+                    f["options"] = retry
+                    f["depends_on"] = {"label": parent["label"], "option": test_option}
+                    break
+
+    def _select_option(self, label: str, option: str) -> None:
+        """扫描阶段专用的选择：点开 label 对应的下拉，选中指定文本的选项。"""
+        item = self._form_item_by_label(label)
+        if item is None:
+            raise LookupError(label)
+        item.locator(".el-select").first.click(timeout=3000)
+        self.page.wait_for_timeout(200)
+        dd = self.page.locator(".el-select-dropdown:visible").last
+        dd.locator(".el-select-dropdown__item").filter(has_text=option).first.click(timeout=3000)
+        self.page.wait_for_timeout(200)
 
     def _peek_options(self, item) -> List[str]:
         """
@@ -257,12 +317,22 @@ def to_config(report: Dict[str, Any], name: Optional[str] = None) -> Dict[str, A
             continue
         label = f["label"]
         col = _match_column(label, headers)
-        steps = [{"check_select_options": {"label": label}}]
+        steps = []
+        dep = f.get("depends_on")
+        name = f"筛选-{label}"
+        if dep:
+            # 级联下拉：这个字段没选父级就是 disabled 的，扫描时已经验证过
+            # "先选父级再选它"能测出选项——生成的用例把这一步补上，不然
+            # 执行时一样会点在一个不可交互的元素上。
+            steps.append({"select": {"label": dep["label"], "option": dep["option"]}})
+            steps.append({"wait": 500})
+            name = f"筛选-{label}（联动{dep['label']}）"
+        steps.append({"check_select_options": {"label": label}})
         if col:
             # 循环后 ${selected_label} 停在最后一个选项，据此校验列值
             steps.append({"assert_column_all": {"column": col,
                                                 "equals": "${selected_%s}" % label}})
-        cases.append({"name": f"筛选-{label}", "tags": ["search"], "steps": steps})
+        cases.append({"name": name, "tags": ["search"], "steps": steps})
 
     # 4. 日期范围
     for f in fields:

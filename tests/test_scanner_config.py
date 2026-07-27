@@ -73,5 +73,48 @@ class ToConfigPhase1Tests(unittest.TestCase):
         self.assertNotIn("TODO", active_blob)
 
 
+class CascadingSelectConfigTests(unittest.TestCase):
+    """
+    级联下拉（如"城市"依赖"国家"先选）扫描阶段探测到 depends_on 后，
+    生成的用例必须先选父级再操作子级，否则执行时会点在一个 disabled
+    元素上，和扫描阶段踩的坑一样。
+    """
+
+    def setUp(self):
+        self.report = {
+            "url": "http://x.test/web/franchise",
+            "title": "加盟商管理",
+            "form_fields": [
+                {"label": "国家", "type": "select", "options": ["全部", "中国", "韩国"]},
+                {"label": "城市", "type": "select", "options": ["北京市", "上海市"],
+                 "depends_on": {"label": "国家", "option": "中国"}},
+            ],
+            "table": {"headers": ["城市", "加盟商名称"], "row_count": 3,
+                      "column_types": {}, "sample_row": {}},
+            "buttons": {"search": True, "reset": False, "export": False, "create": False},
+            "pagination": {},
+            "list_api": None,
+        }
+
+    def test_dependent_select_case_selects_parent_first(self):
+        cfg = scanner.to_config(self.report)
+        case = next(c for c in cfg["cases"] if c["name"].startswith("筛选-城市"))
+        first_step = case["steps"][0]
+        self.assertEqual({"select": {"label": "国家", "option": "中国"}}, first_step)
+        actions = [a for s in case["steps"] for a in s.keys()]
+        self.assertIn("check_select_options", actions)
+
+    def test_dependent_select_case_name_mentions_parent(self):
+        cfg = scanner.to_config(self.report)
+        case = next(c for c in cfg["cases"] if c["name"].startswith("筛选-城市"))
+        self.assertIn("国家", case["name"])
+
+    def test_independent_select_case_has_no_prerequisite_step(self):
+        cfg = scanner.to_config(self.report)
+        case = next(c for c in cfg["cases"] if c["name"] == "筛选-国家")
+        first_step = case["steps"][0]
+        self.assertIn("check_select_options", first_step)
+
+
 if __name__ == "__main__":
     unittest.main()
