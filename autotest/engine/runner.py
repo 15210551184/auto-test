@@ -164,8 +164,23 @@ def run_case(ctx: Context, case: Case) -> CaseResult:
 
     # 每条用例回到干净的页面状态，避免用例间互相污染
     ctx.reset_signals()
-    ctx.page.goto(ctx.config.url, wait_until="domcontentloaded", timeout=60000)
-    ctx.page.wait_for_timeout(800)
+    frag = ctx.config.list_api
+    if frag:
+        # 等这次导航触发的列表接口真正返回，比固定等待更准；expect_response
+        # 必须包住触发动作（goto）本身才能等到它，不能在 goto 之后才注册——
+        # 之前 scanner.scan() 就是在 goto 之后才等，经常等到无关的早发请求，
+        # 这里改用正确的用法：包住 goto，等的就是这次导航真正触发的那次列表请求。
+        try:
+            with ctx.page.expect_response(
+                lambda r: frag in r.url and r.status == 200, timeout=15000
+            ):
+                ctx.page.goto(ctx.config.url, wait_until="domcontentloaded", timeout=60000)
+            ctx.page.wait_for_timeout(500)
+        except Exception:
+            ctx.page.wait_for_timeout(3000)   # 没等到，退回一个更保守的固定等待
+    else:
+        ctx.page.goto(ctx.config.url, wait_until="domcontentloaded", timeout=60000)
+        ctx.page.wait_for_timeout(1500)
 
     # 长时间运行中 session 可能过期，掉回登录页就就地重登，
     # 否则后面每条用例都会在登录页上失败

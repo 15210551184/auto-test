@@ -26,19 +26,29 @@ class ElementUIAdapter:
         Element 的 label 和控件是兄弟节点，没有 for/id 关联，
         所以要先定位到包含该 label 的 .el-form-item 容器再往下找控件。
         label 文本可能带冒号，用正则兼容。
+
+        用 wait_for 而不是直接判 count()==0：count() 不会重试，用例一开始
+        刚 goto 完，搜索表单可能还没渲染完，count() 立刻返回 0 就误判"找不到"，
+        实际只是慢了一点。wait_for 会在超时前持续重试，页面快就立刻返回。
         """
         pattern = re.compile(rf"^\s*{re.escape(label)}\s*[:：]?\s*$")
         item = page.locator(".el-form-item").filter(
             has=page.locator(".el-form-item__label").filter(has_text=pattern)
         )
-        if item.count() == 0:
-            # 有些页面不用 el-form-item，退化成找 label 的父容器
-            item = page.locator(
-                f"xpath=//*[contains(@class,'el-form-item')][.//label[normalize-space()='{label}']]"
-            )
-        if item.count() == 0:
+        try:
+            item.first.wait_for(state="attached", timeout=6000)
+            return item.first
+        except Exception:
+            pass
+        # 有些页面不用 el-form-item，退化成找 label 的父容器
+        xitem = page.locator(
+            f"xpath=//*[contains(@class,'el-form-item')][.//label[normalize-space()='{label}']]"
+        )
+        try:
+            xitem.first.wait_for(state="attached", timeout=3000)
+            return xitem.first
+        except Exception:
             raise LookupError(f"找不到表单项: {label}")
-        return item.first
 
     def fill(self, page: Page, label: str, value: str) -> None:
         item = self._form_item(page, label)
@@ -126,7 +136,7 @@ class ElementUIAdapter:
       const hw = el.querySelector('.el-table__header-wrapper') || el;
       let hc = [...hw.querySelectorAll('th .cell')];
       if (!hc.length) hc = [...hw.querySelectorAll('thead th, th')];
-      const headers = hc.map(clean);
+      const headers = hc.map(c => clean(c.innerText));
       const bw = el.querySelector('.el-table__body-wrapper') || el;
       const rows = [...bw.querySelectorAll('tbody tr.el-table__row, tbody tr')]
         .map(tr => [...tr.querySelectorAll('td')].map(td => clean(td.innerText)));
