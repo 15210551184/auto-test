@@ -56,9 +56,13 @@ class Context:
             if m.type == "error" else None))
         self.page.on("requestfailed", lambda r:
                      self.failed_requests.append(f"{r.method} {r.url[:120]}"))
+        # 原来只记 5xx，4xx（比如图片链接挂了返回 404）完全漏记。
+        # 控制台报错里的"Failed to load resource: 404"不带 URL，光看那条消息
+        # 猜不出是哪个资源坏的；这里记下来，assert_no_failed_request 能报出
+        # 具体链接，配合 assert_no_console_error 一起看就知道是什么坏了。
         self.page.on("response", lambda r:
-                     self.failed_requests.append(f"{r.status} {r.url[:120]}")
-                     if r.status >= 500 else None)
+                     self.failed_requests.append(f"{r.status} {r.url[:160]}")
+                     if r.status >= 400 else None)
 
     def selector(self, key: str) -> str:
         """selectors 里的别名 -> CSS；不是别名就当原始选择器用"""

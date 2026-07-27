@@ -212,9 +212,12 @@ def to_config(report: Dict[str, Any], name: Optional[str] = None) -> Dict[str, A
     cases: List[Dict[str, Any]] = []
 
     # 1. 冒烟：页面能打开、表格有数据、渲染正常、无报错
+    # assert_no_failed_request 和 assert_no_console_error 经常一起触发同一个问题
+    # （比如图片挂了）——控制台消息不带 URL，failed_request 能报出具体链接是哪个。
     smoke = [{"assert_row_count": {"min": 1}},
              {"assert_no_render_garbage": None},
-             {"assert_no_console_error": None}]
+             {"assert_no_console_error": None},
+             {"assert_no_failed_request": None}]
     if headers:
         smoke.insert(0, {"assert_headers": {"contains": headers[:5]}})
     cases.append({"name": "列表默认加载", "tags": ["smoke"], "steps": smoke})
