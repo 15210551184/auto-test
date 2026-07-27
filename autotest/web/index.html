@@ -61,9 +61,16 @@ button.danger:hover:not(:disabled){background:#fdeced}
 .btns.fill button{flex:1;min-width:104px}
 .hint{font-size:12px;color:var(--ink-3);margin-top:9px;line-height:1.5}
 .tree{max-height:490px;overflow-y:auto}
-.grp{width:100%;text-align:left;padding:8px 15px 4px;font:600 11px/1.55 inherit;letter-spacing:.06em;
+.grp{width:100%;text-align:left;display:flex;align-items:center;gap:6px;
+  padding:8px 15px 8px;font:600 11px/1.55 inherit;letter-spacing:.06em;
   color:var(--ink-3);background:#fafbfc;border-bottom:1px solid #f0f2f5;position:sticky;top:0;z-index:1}
-.grp:hover{background:#f2f5f9}.grp .chev{display:inline-block;width:16px;color:var(--ink-2)}
+.grp:hover{background:#f2f5f9}.grp .chev{display:inline-block;width:14px;flex:0 0 14px;color:var(--ink-2)}
+/* 二级及以下分组：非全大写字重、带缩进和左侧引导线，和一级分组明显区分，
+   避免「系统管理」和「系统管理／日志管理」看起来是并列的两个一级分组 */
+.grp.lvl1,.grp.lvl2{font:500 12.5px/1.4 inherit;letter-spacing:0;color:var(--ink-2);
+  background:#fff;border-left:2px solid #dde2e9}
+.grp.lvl1:hover,.grp.lvl2:hover{background:#f8fafc}
+.grp .parent{color:var(--ink-3);font-weight:400}
 .item{display:flex;align-items:center;gap:10px;padding:9px 15px;
   border-bottom:1px solid #f4f6f8;cursor:pointer}
 .item:hover{background:#f8fafc}
@@ -71,6 +78,7 @@ button.danger:hover:not(:disabled){background:#fdeced}
 .item input{width:15px;height:15px;flex:0 0 15px;accent-color:var(--busy);cursor:pointer}
 .item .nm{font-size:13.5px}
 .item.off .nm{color:var(--ink-3)}
+.item.lvl1,.item.lvl2{border-left:2px solid #eef1f5}
 .tags{margin-left:auto;display:flex;gap:5px;align-items:center;flex-wrap:wrap;justify-content:flex-end}
 .tag{font-size:11px;padding:2px 7px;border-radius:3px;background:#eef1f5;color:var(--ink-2);white-space:nowrap}
 .tag.rec{background:#e6f6ef;color:var(--pass)}
@@ -152,7 +160,8 @@ a.open:hover{text-decoration:underline}
 <div class="wrap">
   <div>
     <div class="card">
-      <h2>测试哪些菜单 <span class="count" id="pageCount"></span></h2>
+      <h2>测试哪些菜单 <span class="count" id="pageCount"></span>
+        <button class="link sm" type="button" id="btnFoldAll" style="margin-left:auto">全部收起</button></h2>
       <div class="selbar" id="selBar" style="display:none">
         <span id="selInfo"></span>
         <div class="right">
@@ -272,6 +281,13 @@ async function loadProject(){
   pages = proj.pages||[]; renderTree();
 }
 $('#projSel').onchange = loadProject;
+$('#btnFoldAll').onclick=()=>{
+  const keys=Object.keys(pages.reduce((g,p)=>{g[p.group||'未分组']=1;return g;},{}));
+  const allFolded=keys.length>0&&keys.every(g=>collapsedGroups.has(g));
+  collapsedGroups.clear();
+  if(!allFolded) keys.forEach(g=>collapsedGroups.add(g));
+  renderTree();
+};
 
 function renderTree(){
   const tree=$('#tree');
@@ -283,11 +299,18 @@ function renderTree(){
   $('#selBar').style.display='flex';
   const groups={};
   pages.forEach((p,i)=>{const g=p.group||'未分组';(groups[g]=groups[g]||[]).push([p,i]);});
+  // 按路径字符串排序：父分组「系统管理」严格排在子分组「系统管理 / 日志管理」前面，
+  // 前缀关系在普通字符串比较下天然成立，子分组会紧跟在父分组后面，视觉上连成一块。
+  const groupKeys=Object.keys(groups).sort();
   let h='';
-  for(const g in groups){
+  for(const g of groupKeys){
     const folded=collapsedGroups.has(g);
     const selected=groups[g].filter(x=>x[0].selected).length;
-    h+='<button class="grp" type="button" data-group="'+esc(g)+'"><input class="grp-check" type="checkbox" data-group-check="'+esc(g)+'" '+(selected===groups[g].length?'checked':'')+'><span class="chev">'+(folded?'▸':'▾')+'</span>'+esc(g)+'（'+groups[g].length+'）</button>';
+    const segs=g.split(' / '), depth=Math.min(segs.length-1,2), leaf=segs[segs.length-1];
+    const parentPrefix=depth>0?'<span class="parent">'+esc(segs.slice(0,-1).join(' / '))+' / </span>':'';
+    h+='<button class="grp lvl'+depth+'" type="button" data-group="'+esc(g)+'" style="padding-left:'+(15+depth*16)+'px">'+
+       '<input class="grp-check" type="checkbox" data-group-check="'+esc(g)+'" '+(selected===groups[g].length?'checked':'')+'>'+
+       '<span class="chev">'+(folded?'▸':'▾')+'</span>'+parentPrefix+esc(leaf)+'（'+groups[g].length+'）</button>';
     if(folded) continue;
     groups[g].forEach(function(pair){
       const p=pair[0],i=pair[1],tags=[];
@@ -297,13 +320,15 @@ function renderTree(){
       if(p.has_export) tags.push('<span class="tag">可导出</span>');
       if(p.has_create) tags.push('<span class="tag">可新增</span>');
       if(p.recommended) tags.push('<span class="tag rec">推荐</span>');
-      h+='<label class="item '+(p.selected?'':'off')+'">'+
+      h+='<label class="item lvl'+depth+' '+(p.selected?'':'off')+'" style="padding-left:'+(15+depth*16+18)+'px">'+
          '<input type="checkbox" data-i="'+i+'" '+(p.selected?'checked':'')+'>'+
          '<span class="nm">'+esc(p.name)+'</span>'+
          '<span class="tags">'+tags.join('')+(p.has_config?'<button class="link sm" type="button" data-yaml="'+i+'">编辑 YAML</button>':'')+'<button class="danger sm" type="button" data-del="'+i+'">删除</button></span></label>';
     });
   }
   tree.innerHTML=h;
+  const allFolded=groupKeys.length>0&&groupKeys.every(g=>collapsedGroups.has(g));
+  $('#btnFoldAll').textContent=allFolded?'全部展开':'全部收起';
   tree.querySelectorAll('input[type=checkbox]').forEach(cb=>{
     if(cb.dataset.groupCheck)return;
     cb.onchange=()=>{pages[+cb.dataset.i].selected=cb.checked;

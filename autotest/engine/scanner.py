@@ -179,16 +179,13 @@ def scan(url: str, storage_state: Optional[str] = None,
         page = bctx.new_page()
         sc = PageScanner(page)
         page.goto(url, wait_until="domcontentloaded", timeout=60000)
-        # 不再一律死等 wait 毫秒：等到列表接口返回就继续，只留一小段渲染时间。
-        # 快页面从固定 3s 降到 ~接口耗时+600ms；慢页面仍最多等 wait 毫秒后兜底。
-        try:
-            page.wait_for_response(
-                lambda r: bool(re.search(r"/(api|web)/", r.url))
-                and "json" in (r.headers or {}).get("content-type", ""),
-                timeout=wait)
-            page.wait_for_timeout(600)
-        except Exception:
-            page.wait_for_timeout(800)
+        # 曾经改成"等到第一个 api/json 响应就继续"想省点时间，结果翻车：
+        # 页面进来常先打几个无关请求（权限校验/字典/当前用户），一旦命中这种
+        # 早到的响应，只再等一点点就去扫表单/按钮，搜索框、筛选项、导出按钮
+        # 经常还没渲染完，扫描直接漏掉——生成的用例看着正常，实际少了一大半。
+        # 扫描只跑一次，慢 1-2 秒不影响体验，但扫漏了没人会发现，代价划不来。
+        # 老老实实固定等，用等待换正确性。
+        page.wait_for_timeout(wait)
 
         report = {
             "url": url,
