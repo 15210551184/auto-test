@@ -199,14 +199,26 @@ def run_case(ctx: Context, case: Case) -> CaseResult:
             return CaseResult(case.name, Status.ERROR, error=f"会话过期且重登失败: {e}")
 
     results, status = [], Status.PASS
-    for step in case.steps:
+    stopped_at = None
+    for i, step in enumerate(case.steps):
         r = run_step(ctx, step)
         results.append(r)
         if r.status in (Status.FAIL, Status.ERROR):
             status = r.status
+            stopped_at = i
             break   # 快速失败：后续步骤依赖前面的状态，继续跑没意义
         if r.status == Status.WARN and status == Status.PASS:
             status = Status.WARN   # 警告不打断执行，只把整条用例的状态标成"有警告"
+
+    if stopped_at is not None:
+        # 快速失败会跳过后面所有步骤——但如果用例末尾是 delete_and_verify
+        # 这类清理步骤，跳过它就等于把本次自动创建的测试数据永久留在系统里，
+        # 这条铁律（只动自己建的数据、跑完自动清理）不能因为前面验证失败就破例。
+        # delete_and_verify 自己有幂等和安全检查（没有待清理记录会直接跳过，
+        # 不是 auto_ 前缀的数据会拒绝删除），这里放心兜底执行。
+        for step in case.steps[stopped_at + 1:]:
+            if step.action == "delete_and_verify":
+                results.append(run_step(ctx, step))
 
     return CaseResult(case.name, status, results, int((time.time() - t0) * 1000))
 

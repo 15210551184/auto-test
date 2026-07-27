@@ -5,8 +5,9 @@
 不用改引擎。ctx 是执行上下文，带着 page / adapter / 变量池 / 抓取的数据。
 """
 import re
-from typing import Any, Callable, Dict
+from typing import Any, Callable, Dict, List
 
+from . import datafactory as DF
 from . import normalize as N
 
 REGISTRY: Dict[str, Callable] = {}
@@ -574,3 +575,250 @@ def as_no_failed_req(ctx, ignore: list = None, **kw):
 def do_screenshot(ctx, name: str = None, value: str = None, **kw):
     path = ctx.shot(name or value or "manual")
     return f"截图 {path}"
+
+
+# ============ 第二期：新增/修改闭环验证 ============
+#
+# 铁律：只动自己造的数据。这里每个动作都要求调用方明确给出 identity 列和值，
+# find_row_by 找不到、或者匹配上不止一行都直接报错——绝不在一堆真实业务数据
+# 里瞎猜一行去改/删。
+
+def _open_dialog(ctx, trigger_selector: str) -> None:
+    ctx.page.locator(trigger_selector).first.click(timeout=5000)
+    dlg = ctx.ui.dialog(ctx.page)
+    dlg.wait_for(state="visible", timeout=5000)
+    ctx.page.wait_for_timeout(500)   # 等弹窗里的下拉/字典数据加载完
+
+
+def _fill_fields(ctx, fields: List[Dict[str, Any]], values: Dict[str, Any]) -> None:
+    by_label = {f["label"]: f for f in fields}
+    for label, v in values.items():
+        f = by_label.get(label, {"label": label, "type": "text"})
+        ctx.ui.set_field_value(ctx.page, f, v)
+
+
+def _submit(ctx) -> str:
+    ctx.page.locator(ctx.selector("submit_btn")).first.click(timeout=5000)
+    ctx.page.wait_for_timeout(300)
+    try:
+        return ctx.ui.message_text(ctx.page, timeout=5000)
+    except Exception:
+        return ""
+
+
+@action("assert_form_errors")
+def as_form_errors(ctx, expect: list = None, **kw):
+    """
+    必填校验：假定新增/编辑弹窗已经打开，什么都不填直接点提交，
+    断言该报错的字段都报错了。expect 不给就只要求"至少报了点什么"。
+    """
+    _submit(ctx)
+    got = ctx.ui.form_error_labels(ctx.page)
+    if not got:
+        texts = ctx.ui.form_error_texts(ctx.page)
+        if texts:
+            got = texts   # 有些页面错误信息不挂在 label 对应的 form-item 上
+    if expect:
+        missing = [f for f in expect if not any(f in g for g in got)]
+        if missing:
+            _fail(f"必填校验缺失，这些字段应该报错但没报: {missing}（实际报错: {got}）")
+    elif not got:
+        _fail("提交空表单没有触发任何校验提示，必填校验可能没生效")
+    return f"必填校验通过，{len(got)} 项报错符合预期"
+
+
+@action("create_and_verify")
+def do_create_and_verify(ctx, fields: list = None, identity: str = None,
+                         identity_column: str = None, only_required: bool = False,
+                         export: str = None, **kw):
+    """
+    新增闭环：打开新增弹窗 → 数据工厂生成合法值 → 逐字段填写 → 提交 →
+    断言成功提示 → 回列表搜索 → 断言每个字段值和填的一致。
+
+    identity 是拿来定位这条新记录的字段（通常是"名称"这类唯一性字段），
+    identity_column 是它对应的表格列名（大多数情况和 label 同名，不同名时指定）。
+    生成的值和这条记录的行号存进 ctx.vars，供后续 edit/detail/delete 步骤使用。
+    """
+    if not fields:
+        _fail("没有可用的表单字段（扫描时没探测到新增弹窗结构）")
+    identity = identity or fields[0]["label"]
+    identity_column = identity_column or identity
+
+    _open_dialog(ctx, ctx.selector("create_btn"))
+    values = DF.fill_values(fields, only_required=only_required)
+    if identity not in values:
+        # identity 字段必须真的填了值，不然后面搜不到这条记录
+        f = next((x for x in fields if x["label"] == identity), {"label": identity, "type": "text"})
+        v = DF.value_for(f) or f"{DF.AUTO_PREFIX}{identity}"
+        values[identity] = v
+    _fill_fields(ctx, fields, values)
+
+    msg = _submit(ctx)
+    if "成功" not in msg and "失败" in msg:
+        _fail(f"提交后提示: '{msg}'，疑似保存失败")
+
+    ident_val = str(values[identity])
+    try:
+        ctx.ui.fill(ctx.page, identity, ident_val)
+        do_search(ctx)
+    except LookupError:
+        # identity 字段不在搜索表单里（不是每个新增字段都能搜），退回整页扫
+        do_search(ctx)
+
+    row = ctx.ui.find_row_by(ctx.page, identity_column, ident_val)
+    row_data = ctx.ui.table_data(ctx.page)[row]
+
+    diffs = []
+    checked = 0
+    for label, v in values.items():
+        col_val = row_data.get(label)
+        if col_val is None:
+            continue   # 表格里没有这一列（比如密码字段），跳过不算
+        checked += 1
+        if not N.compare(v, col_val):
+            diffs.append(f"{label}: 填的='{v}' 列表显示='{col_val}'")
+    if diffs:
+        _fail(f"新增后列表数据不一致 {len(diffs)}/{checked} 处: {diffs[:5]}")
+
+    ctx.vars["created_row"] = row
+    ctx.vars["created_identity"] = ident_val
+    ctx.vars["created_identity_column"] = identity_column
+    ctx.vars["created_fields"] = values
+    ctx.vars["created_field_schema"] = fields   # 供 edit_and_verify 按类型正确填表
+    if export:
+        ctx.vars[export] = ident_val
+    return f"新增闭环通过：填 {len(values)} 项，列表比对 {checked} 项一致 ✓"
+
+
+@action("assert_form_prefilled")
+def as_form_prefilled(ctx, identity_column: str = None, action: str = "编辑", **kw):
+    """
+    编辑回显：打开编辑弹窗，断言表单里的值和列表当前显示的值一致。
+    "提示成功但其实编辑弹窗回显不出原值"是后台系统的常见 bug，这条专门抓这个。
+    """
+    identity_column = identity_column or ctx.vars.get("created_identity_column")
+    ident_val = ctx.vars.get("created_identity")
+    if not identity_column or ident_val is None:
+        _fail("没有可用的记录定位信息，请先执行 create_and_verify")
+
+    row = ctx.ui.find_row_by(ctx.page, identity_column, ident_val)
+    row_data = ctx.ui.table_data(ctx.page)[row]
+    ctx.ui.row_action(ctx.page, row, action)
+
+    form_vals = ctx.ui.dialog_field_values(ctx.page)
+    diffs = []
+    checked = 0
+    for label, list_val in row_data.items():
+        if label not in form_vals or not list_val:
+            continue
+        checked += 1
+        if not N.compare(list_val, form_vals[label]):
+            diffs.append(f"{label}: 列表='{list_val}' 编辑框回显='{form_vals[label]}'")
+    if diffs:
+        _fail(f"编辑弹窗回显不一致 {len(diffs)}/{checked} 处: {diffs[:5]}")
+    ctx.vars["edit_row"] = row
+    return f"编辑回显校验通过，比对 {checked} 项 ✓"
+
+
+@action("edit_and_verify")
+def do_edit_and_verify(ctx, fields: dict = None, identity_column: str = None, **kw):
+    """
+    修改闭环：假定编辑弹窗已打开（前一步通常是 assert_form_prefilled），
+    改指定字段 → 提交 → 断言列表对应行确实变了。
+    """
+    if not fields:
+        _fail("edit_and_verify 需要指定要改哪些字段")
+    identity_column = identity_column or ctx.vars.get("created_identity_column")
+    ident_val = ctx.vars.get("created_identity")
+    if identity_column is None or ident_val is None:
+        _fail("没有可用的记录定位信息，请先执行 create_and_verify")
+
+    resolved = {label: ctx.resolve(v) for label, v in fields.items()}
+    schema = ctx.vars.get("created_field_schema") or []
+    _fill_fields(ctx, schema, resolved)
+    msg = _submit(ctx)
+    if "成功" not in msg and "失败" in msg:
+        _fail(f"提交后提示: '{msg}'，疑似保存失败")
+
+    # identity 本身没改的话，还是用老值去定位这一行
+    row = ctx.ui.find_row_by(ctx.page, identity_column, ident_val)
+    row_data = ctx.ui.table_data(ctx.page)[row]
+    diffs = []
+    for label, v in resolved.items():
+        col_val = row_data.get(label)
+        if col_val is None:
+            continue
+        if not N.compare(v, col_val):
+            diffs.append(f"{label}: 改成='{v}' 列表显示='{col_val}'")
+    if diffs:
+        _fail(f"修改后列表没有对应更新 {len(diffs)} 处: {diffs[:5]}")
+    ctx.vars.setdefault("created_fields", {}).update(resolved)
+    return f"修改闭环通过：改了 {len(resolved)} 项，列表已同步 ✓"
+
+
+@action("assert_detail_matches")
+def as_detail_matches(ctx, identity_column: str = None, action: str = "查看", **kw):
+    """
+    详情一致性：打开详情弹窗/页面，断言每个字段和列表当前显示的值一致。
+    "列表对但详情是老值"是后台系统另一个高频 bug。
+    """
+    identity_column = identity_column or ctx.vars.get("created_identity_column")
+    ident_val = ctx.vars.get("created_identity")
+    if not identity_column or ident_val is None:
+        _fail("没有可用的记录定位信息，请先执行 create_and_verify")
+
+    row = ctx.ui.find_row_by(ctx.page, identity_column, ident_val)
+    row_data = ctx.ui.table_data(ctx.page)[row]
+    ctx.ui.row_action(ctx.page, row, action)
+
+    detail = ctx.ui.detail_values(ctx.page)
+    if ctx.ui.dialog_visible(ctx.page):
+        ctx.ui.close_dialog(ctx.page)
+    diffs = []
+    checked = 0
+    for label, list_val in row_data.items():
+        if label not in detail or not list_val:
+            continue
+        checked += 1
+        if not N.compare(list_val, detail[label]):
+            diffs.append(f"{label}: 列表='{list_val}' 详情='{detail[label]}'")
+    if diffs:
+        _fail(f"详情和列表不一致 {len(diffs)}/{checked} 处: {diffs[:5]}")
+    if checked == 0:
+        return "详情弹窗没有能对上的字段名，跳过比对（可能详情用了不同措辞）"
+    return f"详情一致性校验通过，比对 {checked} 项 ✓"
+
+
+@action("delete_and_verify")
+def do_delete_and_verify(ctx, identity_column: str = None, action: str = "删除", **kw):
+    """
+    清理闭环：删掉本次执行自己创建的那条记录，断言列表里确实没了。
+    只删 ctx.vars 里记录的、本次创建的那一条——不接受传入任意 identity，
+    避免误删非自动化数据。
+    """
+    identity_column = identity_column or ctx.vars.get("created_identity_column")
+    ident_val = ctx.vars.get("created_identity")
+    if not identity_column or ident_val is None:
+        return "没有需要清理的记录，跳过"
+    if not DF.is_auto_data(ident_val):
+        _fail(f"'{ident_val}' 不像是自动化创建的数据（没有 {DF.AUTO_PREFIX} 前缀），"
+             f"为避免误删真实数据，拒绝执行删除")
+
+    try:
+        row = ctx.ui.find_row_by(ctx.page, identity_column, ident_val)
+    except LookupError:
+        return "记录已不在列表中，可能已被清理"
+    ctx.ui.row_action(ctx.page, row, action)
+    if ctx.ui.dialog_visible(ctx.page):
+        try:
+            ctx.ui.confirm_dialog(ctx.page, ok=True)
+        except Exception:
+            pass
+    ctx.page.wait_for_timeout(600)
+
+    try:
+        ctx.ui.find_row_by(ctx.page, identity_column, ident_val)
+        _fail(f"删除后记录仍在列表中: {ident_val}")
+    except LookupError:
+        pass
+    return f"清理完成：'{ident_val}' 已从列表移除 ✓"

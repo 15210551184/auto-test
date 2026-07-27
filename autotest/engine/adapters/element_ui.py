@@ -6,7 +6,7 @@ Element UI 适配层。
 换成 Ant Design 只要再写一个同接口的适配器。
 """
 import re
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 from playwright.sync_api import Page, Locator
 
@@ -128,6 +128,39 @@ class ElementUIAdapter:
         page.wait_for_timeout(200)
         page.keyboard.press("Escape")
 
+    def set_field_value(self, page: Page, field: Dict[str, Any], value: Any) -> None:
+        """
+        按扫描出来的字段类型把值填进去。CRUD 闭环验证的统一填表入口——
+        fill_form 只会无脑往 input 里塞文本，select/radio/switch 这些非文本
+        控件光靠"点输入框打字"填不对，必须按类型分派。
+        """
+        label, ftype = field["label"], field.get("type", "text")
+        if ftype in ("text", "textarea", "number"):
+            self.fill(page, label, str(value))
+        elif ftype in ("select", "radio"):
+            self.select(page, label, option=str(value))
+        elif ftype == "checkbox":
+            item = self._form_item(page, label)
+            opts = value if isinstance(value, list) else [value]
+            for opt in opts:
+                item.locator(".el-checkbox").filter(has_text=str(opt)).first.click(timeout=3000)
+        elif ftype == "date":
+            item = self._form_item(page, label)
+            inp = item.locator(".el-date-editor input").first
+            inp.fill(str(value))
+            page.keyboard.press("Enter")
+        elif ftype == "date_range":
+            start, end = value
+            self.date_range(page, label, start, end)
+        elif ftype == "switch":
+            item = self._form_item(page, label)
+            sw = item.locator(".el-switch").first
+            cls = sw.get_attribute("class") or ""
+            if bool(value) != ("is-checked" in cls):
+                sw.click(timeout=3000)
+        else:
+            raise LookupError(f"字段类型 '{ftype}' 暂不支持自动填写: {label}")
+
     # ---------- 表格 ----------
     # 一次 evaluate 把整张表读进来，避免 rows×cols 次 .nth().inner_text() 往返——
     # 这是执行期最大的性能热点：capture / 各列断言 / 导出比对全走这里。
@@ -194,6 +227,25 @@ class ElementUIAdapter:
             out.append(row)
         return out
 
+    def find_row_by(self, page: Page, column: str, value: str,
+                    table: str = ".el-table") -> int:
+        """
+        按某列的值定位行号，CRUD 闭环验证用它找到"自己刚建的那条记录"。
+        用 contains 而不是精确相等——列宽不够时页面会截断显示（"用户Bcl..."），
+        精确匹配会把自己刚建的数据也找不到。
+        找不到、或者匹配上不止一行（说明搜索条件不够精确）都报错，
+        不能瞎猜一行就去改/删——那可能是别人的真实数据。
+        """
+        rows = self.table_data(page, table)
+        hits = [i for i, r in enumerate(rows) if value in str(r.get(column, ""))]
+        if not hits:
+            raise LookupError(f"列 '{column}' 里没有找到包含 '{value}' 的行，"
+                              f"当前 {len(rows)} 行")
+        if len(hits) > 1:
+            raise LookupError(f"列 '{column}' 里有 {len(hits)} 行都包含 '{value}'，"
+                              f"定位不到唯一记录，不敢继续操作")
+        return hits[0]
+
     # ---------- 分页 ----------
     def total_count(self, page: Page) -> Optional[int]:
         """从 '共 1234 条' 里抠出总数"""
@@ -236,6 +288,144 @@ class ElementUIAdapter:
     def dialog(self, page: Page) -> Locator:
         """当前可见的弹窗（新增/编辑表单通常在这里面）"""
         return page.locator(".el-dialog__wrapper:visible .el-dialog, .el-drawer:visible").last
+
+    # ---------- CRUD 验证支撑 ----------
+    def row_action(self, page: Page, row: int, action: str,
+                   table: str = ".el-table") -> None:
+        """
+        点某一行的操作按钮（查看/编辑/删除）。
+        操作列可能直接放按钮，也可能收在「…」下拉里（行窄时常见），两种都试。
+        """
+        rows = self.rows(page, table)
+        if rows.count() <= row:
+            raise LookupError(f"表格只有 {rows.count()} 行，取不到第 {row + 1} 行")
+        tr = rows.nth(row)
+
+        direct = tr.locator(
+            f"button:has-text('{action}'), a:has-text('{action}'), "
+            f"span:has-text('{action}'), .el-link:has-text('{action}')")
+        for i in range(direct.count()):
+            try:
+                el = direct.nth(i)
+                if el.is_visible():
+                    el.click(timeout=3000)
+                    page.wait_for_timeout(600)
+                    return
+            except Exception:
+                continue
+
+        # 收在「…」更多菜单里：点开后浮层挂在 body 下，不在行内
+        more = tr.locator(".el-dropdown, .el-icon-more, button:has-text('…'), "
+                          "button:has-text('...')").first
+        if more.count():
+            try:
+                more.click(timeout=3000)
+                page.wait_for_timeout(400)
+                menu = page.locator(".el-dropdown-menu:visible").last
+                menu.locator(f".el-dropdown-menu__item:has-text('{action}')") \
+                    .first.click(timeout=3000)
+                page.wait_for_timeout(600)
+                return
+            except Exception:
+                pass
+        raise LookupError(f"第 {row + 1} 行找不到「{action}」操作")
+
+    def dialog_field_values(self, page: Page) -> Dict[str, str]:
+        """
+        读弹窗里每个表单项当前的值，用于验证编辑回显。
+        input 取 value，下拉也是渲染成 input 的，所以统一读 input；
+        读不到就退回读文本（radio/switch 这类）。
+        """
+        dlg = self.dialog(page)
+        out: Dict[str, str] = {}
+        items = dlg.locator(".el-form-item")
+        for i in range(items.count()):
+            item = items.nth(i)
+            try:
+                label = item.locator(".el-form-item__label").first.inner_text()
+            except Exception:
+                continue
+            label = label.strip().rstrip(":：").strip().lstrip("*").strip()
+            if not label:
+                continue
+            val = ""
+            try:
+                inp = item.locator("input, textarea").first
+                if inp.count():
+                    val = inp.input_value()
+            except Exception:
+                pass
+            if not val:
+                try:
+                    content = item.locator(".el-form-item__content").first
+                    if content.count():
+                        val = re.sub(r"\s+", " ", content.inner_text()).strip()
+                except Exception:
+                    pass
+            out[label] = val
+        return out
+
+    def detail_values(self, page: Page) -> Dict[str, str]:
+        """
+        读详情弹窗的「字段：值」。详情不一定用 el-form-item 渲染（常见是
+        el-descriptions，或者干脆一堆 div），所以按「冒号分隔」兜底解析文本。
+        """
+        dlg = self.dialog(page)
+        out: Dict[str, str] = {}
+
+        # 1. el-descriptions 这类结构化的，直接按 label/content 配对
+        rows = dlg.locator(".el-descriptions-item")
+        for i in range(rows.count()):
+            it = rows.nth(i)
+            try:
+                k = it.locator(".el-descriptions-item__label").first.inner_text().strip()
+                v = it.locator(".el-descriptions-item__content").first.inner_text().strip()
+                if k:
+                    out[k.rstrip(":：").strip()] = v
+            except Exception:
+                continue
+        if out:
+            return out
+
+        # 2. 兜底：整块文本按行拆，取「xxx：yyy」形式的行
+        try:
+            text = dlg.inner_text()
+        except Exception:
+            return out
+        for line in text.splitlines():
+            line = line.strip()
+            m = re.match(r"^(.{1,20}?)\s*[:：]\s*(.*)$", line)
+            if m:
+                k, v = m.group(1).strip(), m.group(2).strip()
+                if k:
+                    out[k] = v
+        return out
+
+    def form_error_labels(self, page: Page) -> List[str]:
+        """
+        当前弹窗里哪些表单项报了校验错误（用于必填校验断言）。
+        返回报错项的 label 列表。
+        """
+        dlg = self.dialog(page)
+        out = []
+        items = dlg.locator(".el-form-item.is-error")
+        for i in range(items.count()):
+            try:
+                lb = items.nth(i).locator(".el-form-item__label").first.inner_text()
+                lb = lb.strip().rstrip(":：").strip().lstrip("*").strip()
+                if lb:
+                    out.append(lb)
+            except Exception:
+                continue
+        return out
+
+    def form_error_texts(self, page: Page) -> List[str]:
+        dlg = self.dialog(page)
+        try:
+            return [t.strip() for t in
+                    dlg.locator(".el-form-item__error").all_inner_texts() if t.strip()]
+        except Exception:
+            return []
 
     # ---------- 按钮巡检 ----------
     # 破坏性操作的关键词，巡检时只确认"存在且可点"，绝不真的点下去

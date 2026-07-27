@@ -141,6 +141,131 @@ class PageScanner:
         except Exception:
             return []
 
+    # ---------- 新增/编辑表单结构识别 ----------
+    # 这是 CRUD 验证的总开关。字段名、是否必填、长度上限、下拉选项，DOM 里
+    # 全是现成的（必填 = .el-form-item.is-required，长度 = input 的 maxlength），
+    # 读出来就能自动生成必填校验、边界校验、填表闭环验证，不需要人工配业务规则。
+
+    def scan_form_schema(self, trigger: str = "新增") -> Dict[str, Any]:
+        """点开新增弹窗扫字段结构，扫完关掉。点不开就返回空，不影响其他扫描。"""
+        btn = self.page.locator(
+            f"button:has-text('{trigger}'), a:has-text('{trigger}')").first
+        try:
+            if btn.count() == 0:
+                return {}
+            btn.click(timeout=3000)
+        except Exception:
+            return {}
+
+        dialog = self.page.locator(
+            ".el-dialog__wrapper:visible .el-dialog, .el-drawer:visible").last
+        try:
+            dialog.wait_for(state="visible", timeout=5000)
+        except Exception:
+            return {}
+        self.page.wait_for_timeout(600)   # 等弹窗里的下拉/字典数据加载完
+
+        title = ""
+        try:
+            t = dialog.locator(".el-dialog__title, .el-drawer__title").first
+            if t.count():
+                title = t.inner_text().strip()
+        except Exception:
+            pass
+
+        try:
+            fields = self._scan_dialog_fields(dialog)
+        finally:
+            self._close_dialog(dialog)   # 扫失败也要关掉，否则挡住后面的扫描
+        return {"title": title, "fields": fields} if fields else {}
+
+    def _scan_dialog_fields(self, dialog) -> List[Dict[str, Any]]:
+        out = []
+        items = dialog.locator(".el-form-item")
+        for i in range(items.count()):
+            item = items.nth(i)
+            try:
+                label = item.locator(".el-form-item__label").first.inner_text().strip()
+            except Exception:
+                continue
+            # 必填项的 label 里可能带星号，去掉
+            label = label.rstrip(":：").strip().lstrip("*").strip()
+            if not label:
+                continue
+            try:
+                cls = item.get_attribute("class") or ""
+            except Exception:
+                cls = ""
+            field = {"label": label, "required": "is-required" in cls}
+            field.update(self._field_control(item))
+            out.append(field)
+        return out
+
+    def _field_control(self, item) -> Dict[str, Any]:
+        """判断控件类型，顺手读出长度上限/选项这些约束。"""
+        def has(sel):
+            try:
+                return item.locator(sel).count() > 0
+            except Exception:
+                return False
+
+        # 顺序有讲究：upload/switch 这些内部也可能套 input，必须先判
+        if has(".el-upload"):
+            return {"type": "upload", "fillable": False}
+        if has(".el-switch"):
+            return {"type": "switch"}
+        if has(".el-radio-group, .el-radio"):
+            return {"type": "radio", "options": self._choice_texts(item, ".el-radio")}
+        if has(".el-checkbox-group"):
+            return {"type": "checkbox", "options": self._choice_texts(item, ".el-checkbox")}
+        if has(".el-date-editor"):
+            return {"type": "date_range" if has(".el-range-input") else "date"}
+        if has(".el-cascader"):
+            # 级联选择器（省/市/区那种）层级不定，自动填容易填错，交给人工
+            return {"type": "cascader", "fillable": False}
+        if has(".el-select"):
+            return {"type": "select", "options": self._peek_options(item)}
+        if has(".el-input-number"):
+            return {"type": "number"}
+        if has("textarea"):
+            return {"type": "textarea", "maxlength": self._maxlength(item, "textarea")}
+        if has("input"):
+            return {"type": "text", "maxlength": self._maxlength(item, "input")}
+        return {"type": "unknown", "fillable": False}
+
+    @staticmethod
+    def _maxlength(item, sel: str) -> Optional[int]:
+        try:
+            v = item.locator(sel).first.get_attribute("maxlength")
+            return int(v) if v and v.isdigit() else None
+        except Exception:
+            return None
+
+    @staticmethod
+    def _choice_texts(item, sel: str) -> List[str]:
+        try:
+            return [t.strip() for t in item.locator(sel).all_inner_texts() if t.strip()][:15]
+        except Exception:
+            return []
+
+    def _close_dialog(self, dialog) -> None:
+        """关弹窗。走「取消」而不是「确定」，扫描阶段绝不能提交任何数据。"""
+        for sel in ["button:has-text('取消')", ".el-dialog__headerbtn",
+                    ".el-drawer__close-btn"]:
+            try:
+                btn = dialog.locator(sel).first
+                if btn.count() and btn.is_visible():
+                    btn.click(timeout=2000)
+                    self.page.wait_for_timeout(400)
+                    return
+            except Exception:
+                continue
+        try:
+            self.page.keyboard.press("Escape")
+            self.page.wait_for_timeout(400)
+        except Exception:
+            pass
+
     # ---------- 表格识别 ----------
     def scan_table(self) -> Dict[str, Any]:
         tables = self.page.locator(".el-table, .ant-table, table.data-table, table")
@@ -210,6 +335,7 @@ class PageScanner:
             "create": has("新增", "添加", "创建"),
             "edit": has("编辑", "修改"),
             "delete": has("删除"),
+            "detail": has("查看", "详情"),
             "batch": has("批量"),
         }
 
@@ -263,6 +389,10 @@ def scan(url: str, storage_state: Optional[str] = None,
             "pagination": sc.scan_pagination(),
             "list_api": sc.guess_list_api(),
         }
+        # 表单结构放最后扫：它要点开弹窗，对页面状态的改动最大，
+        # 放前面会影响表格/按钮的识别
+        if report["buttons"].get("create"):
+            report["create_form"] = sc.scan_form_schema("新增")
         browser.close()
     return report
 
@@ -383,8 +513,43 @@ def to_config(report: Dict[str, Any], name: Optional[str] = None) -> Dict[str, A
             }},
         ]})
 
-    # 9. 新增（骨架，字段需人工填）
-    if btns.get("create"):
+    # 9. 新增/修改/详情/删除闭环——有新增弹窗结构（Element UI）才能全自动生成，
+    # 扫不出结构（比如非 Element UI 页面）就退回骨架，标 skip 等人工补。
+    # 铁律：只动自己创建的数据；identity 字段用来在列表里唯一定位这条记录，
+    # 优先选能对上表格列名的文本字段，保证后面 find_row_by 真的能用。
+    create_fields = (report.get("create_form") or {}).get("fields", [])
+    identity_field = _pick_identity(create_fields, headers)
+
+    if create_fields and identity_field:
+        identity = identity_field["label"]
+        identity_column = _match_column(identity, headers) or identity
+        required_labels = [f["label"] for f in create_fields if f.get("required")]
+
+        if required_labels:
+            cases.append({"name": "新增-必填校验", "tags": ["crud"], "steps": [
+                {"click": "create_btn"},
+                {"assert_form_errors": {"expect": required_labels}},
+            ]})
+
+        loop_steps = [{"create_and_verify": {
+            "fields": create_fields, "identity": identity,
+            "identity_column": identity_column}}]
+        if btns.get("edit"):
+            edit_field = _pick_edit_field(create_fields, identity)
+            if edit_field:
+                # 没有另一个能改的文本字段就跳过——不强行打开一个改不了
+                # 什么、还得想办法关掉的编辑弹窗
+                loop_steps.append({"assert_form_prefilled": None})
+                loop_steps.append({"edit_and_verify": {
+                    "fields": {edit_field["label"]: "${random}"}}})
+        if btns.get("detail"):
+            loop_steps.append({"assert_detail_matches": None})
+        if btns.get("delete"):
+            loop_steps.append({"delete_and_verify": None})
+
+        cases.append({"name": "新增-修改-详情-删除完整闭环", "tags": ["crud"],
+                      "steps": loop_steps})
+    elif btns.get("create"):
         cases.append({"name": "新增数据（需补充字段）", "tags": ["crud"],
                       "skip": True, "steps": [
             {"click": "create_btn"},
@@ -445,6 +610,31 @@ def _match_column(label: str, headers: List[str]) -> Optional[str]:
             if best is None or len(h) < len(best):
                 best = h
     return best
+
+
+def _pick_identity(fields: List[Dict[str, Any]], headers: List[str]) -> Optional[Dict[str, Any]]:
+    """
+    挑一个字段用来在列表里唯一定位新建的记录：必须是文本类型（好填、好按
+    contains 比对），优先选能对上表格列名的——保证 find_row_by 真能用它去找，
+    不然生成的闭环用例上来就会因为找不到列而失败。
+    """
+    texts = [f for f in fields
+            if f.get("type") == "text" and f.get("fillable", True)]
+    for f in texts:
+        if _match_column(f["label"], headers):
+            return f
+    return texts[0] if texts else None
+
+
+def _pick_edit_field(fields: List[Dict[str, Any]],
+                     identity_label: str) -> Optional[Dict[str, Any]]:
+    """挑一个非 identity 的文本字段做修改验证——改的不是定位用的字段，
+    改完那条记录还能用原来的 identity 值搜到。"""
+    for f in fields:
+        if f.get("type") == "text" and f["label"] != identity_label \
+                and f.get("fillable", True):
+            return f
+    return None
 
 
 def write_config(cfg: Dict[str, Any], path: str) -> None:

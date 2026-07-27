@@ -116,5 +116,98 @@ class CascadingSelectConfigTests(unittest.TestCase):
         self.assertIn("check_select_options", first_step)
 
 
+class CrudConfigGenerationTests(unittest.TestCase):
+    """
+    有新增弹窗结构（create_form）时应该生成完整的新增/修改/详情/删除闭环，
+    而不是老版本那种需要人工填字段名的 skip 骨架。
+    """
+
+    def _report(self, buttons, create_fields):
+        return {
+            "url": "http://x.test/web/franchise",
+            "title": "加盟商管理",
+            "form_fields": [],
+            "table": {"headers": ["加盟商名称", "负责人", "状态"], "row_count": 3,
+                      "column_types": {}, "sample_row": {}},
+            "buttons": buttons,
+            "pagination": {},
+            "list_api": None,
+            "create_form": {"title": "新增加盟商", "fields": create_fields},
+        }
+
+    def _fields(self):
+        return [
+            {"label": "加盟商名称", "type": "text", "required": True, "maxlength": 50},
+            {"label": "负责人", "type": "text", "required": True, "maxlength": 50},
+            {"label": "状态", "type": "select", "required": False, "options": ["生效", "失效"]},
+        ]
+
+    def test_full_loop_generated_when_all_row_actions_available(self):
+        report = self._report(
+            {"create": True, "edit": True, "delete": True, "detail": True},
+            self._fields())
+        cfg = scanner.to_config(report)
+        names = [c["name"] for c in cfg["cases"]]
+        self.assertIn("新增-必填校验", names)
+        self.assertIn("新增-修改-详情-删除完整闭环", names)
+
+        loop = next(c for c in cfg["cases"] if c["name"] == "新增-修改-详情-删除完整闭环")
+        actions = [a for s in loop["steps"] for a in s.keys()]
+        self.assertEqual(
+            ["create_and_verify", "assert_form_prefilled", "edit_and_verify",
+             "assert_detail_matches", "delete_and_verify"],
+            actions)
+
+    def test_identity_prefers_field_matching_table_header(self):
+        # "加盟商名称"能对上表头，"负责人"也能——但"加盟商名称"排在前面，应该优先选它
+        report = self._report({"create": True}, self._fields())
+        cfg = scanner.to_config(report)
+        loop = next(c for c in cfg["cases"] if c["name"] == "新增-修改-详情-删除完整闭环")
+        params = loop["steps"][0]["create_and_verify"]
+        self.assertEqual("加盟商名称", params["identity"])
+        self.assertEqual("加盟商名称", params["identity_column"])
+
+    def test_edit_field_excludes_identity(self):
+        report = self._report({"create": True, "edit": True}, self._fields())
+        cfg = scanner.to_config(report)
+        loop = next(c for c in cfg["cases"] if c["name"] == "新增-修改-详情-删除完整闭环")
+        edit_step = next(s["edit_and_verify"] for s in loop["steps"] if "edit_and_verify" in s)
+        self.assertNotIn("加盟商名称", edit_step["fields"])   # 不能改用来定位记录的字段
+        self.assertIn("负责人", edit_step["fields"])
+
+    def test_no_edit_button_skips_edit_steps_entirely(self):
+        report = self._report({"create": True, "delete": True}, self._fields())
+        cfg = scanner.to_config(report)
+        loop = next(c for c in cfg["cases"] if c["name"] == "新增-修改-详情-删除完整闭环")
+        actions = [a for s in loop["steps"] for a in s.keys()]
+        self.assertNotIn("assert_form_prefilled", actions)
+        self.assertNotIn("edit_and_verify", actions)
+        self.assertIn("delete_and_verify", actions)   # 其他按钮不受影响
+
+    def test_required_fields_all_listed_in_validation_case(self):
+        report = self._report({"create": True}, self._fields())
+        cfg = scanner.to_config(report)
+        case = next(c for c in cfg["cases"] if c["name"] == "新增-必填校验")
+        expect = case["steps"][1]["assert_form_errors"]["expect"]
+        self.assertEqual(["加盟商名称", "负责人"], expect)   # "状态"不是必填，不该出现
+
+    def test_falls_back_to_skip_skeleton_without_create_form(self):
+        # 扫不出弹窗结构（比如非 Element UI 页面）时不能假装生成了闭环
+        report = self._report({"create": True}, [])
+        report.pop("create_form")
+        cfg = scanner.to_config(report)
+        names = [c["name"] for c in cfg["cases"]]
+        self.assertIn("新增数据（需补充字段）", names)
+        skel = next(c for c in cfg["cases"] if c["name"] == "新增数据（需补充字段）")
+        self.assertTrue(skel["skip"])
+
+    def test_no_create_button_generates_nothing_crud(self):
+        report = self._report({}, [])
+        report.pop("create_form")
+        cfg = scanner.to_config(report)
+        crud_cases = [c for c in cfg["cases"] if "crud" in c.get("tags", [])]
+        self.assertEqual([], crud_cases)
+
+
 if __name__ == "__main__":
     unittest.main()

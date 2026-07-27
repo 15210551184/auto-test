@@ -266,6 +266,49 @@ def _(p):
     return "检查页面没有请求失败（接口报 500 等）"
 
 
+# ============ 第二期：新增/修改闭环 ============
+
+@_tpl("assert_form_errors")
+def _(p):
+    want = _p(p, "expect")
+    if want:
+        return f"什么都不填直接提交，检查这些必填项都报错：{_list(want)}"
+    return "什么都不填直接提交，检查表单有报出校验错误"
+
+
+@_tpl("create_and_verify")
+def _(p):
+    fields = p.get("fields") if isinstance(p, dict) else None
+    n = len(fields) if fields else 0
+    identity = _p(p, "identity", "")
+    return (f"点「新增」，自动生成 {n} 个字段的测试数据并填写、提交，"
+            f"检查提示成功后回列表能搜到这条记录（按「{identity}」定位），"
+            f"且每个填过的字段在列表里显示的值和填的一致")
+
+
+@_tpl("assert_form_prefilled")
+def _(p):
+    return "打开这条记录的编辑弹窗，检查弹窗里回显的值和列表当前显示的值一致"
+
+
+@_tpl("edit_and_verify")
+def _(p):
+    fields = p.get("fields") if isinstance(p, dict) else {}
+    items = "、".join(f"{k}→{_humanize(v)}" for k, v in (fields or {}).items())
+    return f"在编辑弹窗里改：{items or '（无字段）'}，提交，检查列表对应行确实变了"
+
+
+@_tpl("assert_detail_matches")
+def _(p):
+    return "打开这条记录的详情弹窗，检查详情里每个字段和列表当前显示的值一致"
+
+
+@_tpl("delete_and_verify")
+def _(p):
+    return ("删除本次自动创建的这条记录（只删自动化标记过的数据，"
+            "不是自动创建的会拒绝执行），检查列表里确实没了")
+
+
 def explain_step(step: Step) -> str:
     fn = _ACTIONS.get(step.action)
     if fn:
