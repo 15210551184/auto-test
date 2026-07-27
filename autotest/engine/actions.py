@@ -23,8 +23,33 @@ class AssertionFailed(Exception):
     """断言失败（业务问题），区别于 Exception（脚本/环境问题）"""
 
 
+class AssertionWarning(Exception):
+    """
+    检测到问题但不算失败。用于"页面本身显示正常时，这个问题不该拖垮整条用例"
+    的场景——比如控制台报错：页面数据、表头、行数都对，说明用户看到的东西没问题，
+    一条无关的资源报错不该让用例变红；但内容确实不对（行数不对/渲染出乱码）时，
+    这些报错就有诊断价值，会作为上下文附在真正失败的那条断言消息里。
+    """
+
+
 def _fail(msg: str):
     raise AssertionFailed(msg)
+
+
+def _warn(msg: str):
+    raise AssertionWarning(msg)
+
+
+def _diag_suffix(ctx) -> str:
+    """内容类断言（行数/表头/渲染）失败时，附带当时的控制台/网络错误做诊断参考。"""
+    bits = []
+    errs = getattr(ctx, "console_errors", None) or []
+    if errs:
+        bits.append(f"控制台报错 {len(errs)} 条: {errs[:2]}")
+    reqs = getattr(ctx, "failed_requests", None) or []
+    if reqs:
+        bits.append(f"失败请求 {len(reqs)} 条: {reqs[:2]}")
+    return ("\n  ↳ 可能相关: " + "；".join(bits)) if bits else ""
 
 
 # ============ 导航与基础交互 ============
@@ -233,7 +258,7 @@ def as_no_render_garbage(ctx, columns: list = None, extra: list = None, **kw):
             elif ("时间" in c or "日期" in c) and re.fullmatch(r"\d{10,13}", s):
                 bad.append(f"行{i+1} {c} 疑似未格式化时间戳='{s}'")
     if bad:
-        _fail(f"列表有 {len(bad)} 处渲染异常: {bad[:5]}")
+        _fail(f"列表有 {len(bad)} 处渲染异常: {bad[:5]}{_diag_suffix(ctx)}")
     return f"渲染检查通过（{len(data)} 行 × {len(cols)} 列）✓"
 
 
@@ -300,9 +325,9 @@ def do_capture_all(ctx, name: str = "all_pages", max_pages: int = 20, **kw):
 def as_row_count(ctx, min: int = None, max: int = None, equals: int = None, **kw):
     n = ctx.ui.row_count(ctx.page)
     if equals is not None and n != equals:
-        _fail(f"行数应为 {equals}，实际 {n}")
+        _fail(f"行数应为 {equals}，实际 {n}{_diag_suffix(ctx)}")
     if min is not None and n < min:
-        _fail(f"行数应 >= {min}，实际 {n}")
+        _fail(f"行数应 >= {min}，实际 {n}{_diag_suffix(ctx)}")
     if max is not None and n > max:
         _fail(f"行数应 <= {max}，实际 {n}")
     return f"行数 {n} ✓"
@@ -313,11 +338,11 @@ def as_headers(ctx, contains: list = None, equals: list = None, value: list = No
     hs = ctx.ui.headers(ctx.page)
     want = contains or value
     if equals is not None and hs != equals:
-        _fail(f"表头不匹配\n期望: {equals}\n实际: {hs}")
+        _fail(f"表头不匹配\n期望: {equals}\n实际: {hs}{_diag_suffix(ctx)}")
     if want:
         missing = [c for c in want if c not in hs]
         if missing:
-            _fail(f"表头缺少 {missing}，实际表头: {hs}")
+            _fail(f"表头缺少 {missing}，实际表头: {hs}{_diag_suffix(ctx)}")
     return f"表头校验通过 ({len(hs)} 列)"
 
 
@@ -517,19 +542,26 @@ def do_export(ctx, compare_with: str = None, columns: list = None,
 
 @action("assert_no_console_error")
 def as_no_console(ctx, ignore: list = None, **kw):
+    """
+    只降级成警告，不判失败：页面数据、表头、行数这些内容类断言如果都通过了，
+    说明用户看到的东西是对的，一条无关资源报错不该拖垮整条用例。
+    真出现"页面显示不对"时，assert_row_count/assert_headers/
+    assert_no_render_garbage 失败信息里会自动带上这些报错，不用靠这条断言来抓。
+    """
     ignore = ignore or ["favicon", "ResizeObserver"]
     errs = [e for e in ctx.console_errors if not any(p in e for p in ignore)]
     if errs:
-        _fail(f"控制台有 {len(errs)} 条报错: {errs[:3]}")
+        _warn(f"控制台有 {len(errs)} 条报错（页面内容本身正常，不算失败）: {errs[:3]}")
     return "无控制台报错 ✓"
 
 
 @action("assert_no_failed_request")
 def as_no_failed_req(ctx, ignore: list = None, **kw):
+    """同 assert_no_console_error：只警告不判失败，理由见上面那条的说明。"""
     ignore = ignore or []
     bad = [r for r in ctx.failed_requests if not any(p in r for p in ignore)]
     if bad:
-        _fail(f"有 {len(bad)} 个请求失败: {bad[:3]}")
+        _warn(f"有 {len(bad)} 个请求失败（页面内容本身正常，不算失败）: {bad[:3]}")
     return "无失败请求 ✓"
 
 

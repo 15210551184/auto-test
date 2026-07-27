@@ -14,7 +14,7 @@ from playwright.sync_api import sync_playwright, Page
 
 from . import browser as B
 from . import progress
-from .actions import REGISTRY, AssertionFailed
+from .actions import REGISTRY, AssertionFailed, AssertionWarning
 from .login import LoginError, ensure_logged_in, is_login_page, load_dotenv
 from .adapters.element_ui import ElementUIAdapter
 from .models import Case, CaseResult, PageConfig, PageResult, Status, Step, StepResult
@@ -149,6 +149,10 @@ def run_step(ctx: Context, step: Step) -> StepResult:
         msg = fn(ctx, **step.params)
         return StepResult(step.action, step.params, Status.PASS,
                           msg or "", int((time.time() - t0) * 1000))
+    except AssertionWarning as e:
+        # 警告不算失败，不截图（不是真出问题，没必要留证据），也不会打断后续步骤
+        return StepResult(step.action, step.params, Status.WARN, str(e),
+                          int((time.time() - t0) * 1000))
     except AssertionFailed as e:
         return StepResult(step.action, step.params, Status.FAIL, str(e),
                           int((time.time() - t0) * 1000),
@@ -201,6 +205,8 @@ def run_case(ctx: Context, case: Case) -> CaseResult:
         if r.status in (Status.FAIL, Status.ERROR):
             status = r.status
             break   # 快速失败：后续步骤依赖前面的状态，继续跑没意义
+        if r.status == Status.WARN and status == Status.PASS:
+            status = Status.WARN   # 警告不打断执行，只把整条用例的状态标成"有警告"
 
     return CaseResult(case.name, status, results, int((time.time() - t0) * 1000))
 
@@ -247,7 +253,7 @@ def run_page(config: PageConfig, out_dir: str, headless: bool = True,
         for ci, case in enumerate(cases, 1):
             print(f"  ▶ {case.name} ... ", end="", flush=True)
             cr = run_case(ctx, case)
-            icon = {"pass": "✓", "fail": "✗", "error": "!", "skip": "-"}[cr.status.value]
+            icon = {"pass": "✓", "warn": "⚠", "fail": "✗", "error": "!", "skip": "-"}[cr.status.value]
             print(f"{icon} ({cr.duration_ms}ms)")
             if cr.status != Status.PASS and cr.steps:
                 print(f"     └ {cr.steps[-1].message[:160]}")

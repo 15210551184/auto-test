@@ -14,7 +14,9 @@ if "playwright.sync_api" not in sys.modules:
     sys.modules["playwright"] = playwright
     sys.modules["playwright.sync_api"] = sync_api
 
-from autotest.engine.actions import (AssertionFailed, as_no_render_garbage,
+from autotest.engine.actions import (AssertionFailed, AssertionWarning,
+                                     as_no_console, as_no_failed_req,
+                                     as_no_render_garbage, as_row_count,
                                      do_check_select_options)
 
 
@@ -132,6 +134,59 @@ class CheckSelectOptionsTests(unittest.TestCase):
         msg = do_check_select_options(ctx, label="状态")
         self.assertIn("无可选项", msg)
         self.assertNotIn("selected_状态", ctx.vars)
+
+
+class FakeSignalCtx:
+    """带 console_errors/failed_requests 信号的假 ctx，用于测试严重程度降级。"""
+
+    def __init__(self, rows=None, row_count=0, console_errors=None, failed_requests=None):
+        self.ui = FakeUI(rows or [])
+        self.ui.row_count = lambda page: row_count
+        self.page = None
+        self.console_errors = console_errors or []
+        self.failed_requests = failed_requests or []
+
+
+class SeverityDowngradeTests(unittest.TestCase):
+    """
+    回归用例：控制台报错/失败请求不该在页面内容本身正常时拖垮整条用例
+    （只在真正内容出问题的断言失败时，才作为诊断信息带出来）。
+    """
+
+    def test_console_error_is_warning_not_failure(self):
+        ctx = FakeSignalCtx(console_errors=["error: Failed to load resource: 404"])
+        with self.assertRaises(AssertionWarning):
+            as_no_console(ctx)
+        # 明确不是 AssertionFailed
+        try:
+            as_no_console(ctx)
+        except AssertionWarning:
+            pass
+        except AssertionFailed:
+            self.fail("控制台报错不应该判成 AssertionFailed")
+
+    def test_failed_request_is_warning_not_failure(self):
+        ctx = FakeSignalCtx(failed_requests=["404 http://x/flag.png"])
+        with self.assertRaises(AssertionWarning):
+            as_no_failed_req(ctx)
+
+    def test_no_errors_passes_cleanly(self):
+        ctx = FakeSignalCtx()
+        self.assertIn("无控制台报错", as_no_console(ctx))
+        self.assertIn("无失败请求", as_no_failed_req(ctx))
+
+    def test_content_failure_carries_console_error_as_context(self):
+        # 页面真出问题（行数不对）时，失败信息里应该带上当时的控制台报错做线索
+        ctx = FakeSignalCtx(row_count=0, console_errors=["error: 404 not found"])
+        with self.assertRaises(AssertionFailed) as cm:
+            as_row_count(ctx, min=1)
+        self.assertIn("404", str(cm.exception))
+
+    def test_content_failure_without_signals_has_no_dangling_context(self):
+        ctx = FakeSignalCtx(row_count=0)
+        with self.assertRaises(AssertionFailed) as cm:
+            as_row_count(ctx, min=1)
+        self.assertNotIn("可能相关", str(cm.exception))
 
 
 if __name__ == "__main__":

@@ -377,11 +377,22 @@ run_page()
 
 ```python
 page.on("console", ...)        # 收集前端报错
-page.on("requestfailed", ...)  # 收集失败请求
-page.on("response", ...)       # 收集 5xx
+page.on("requestfailed", ...)  # 收集失败请求（网络层面，如断连）
+page.on("response", ...)       # 收集 4xx/5xx（含图片等资源 404）
 ```
 
 对应 `assert_no_console_error` 和 `assert_no_failed_request` 两个断言。
+
+**这两个断言只降级成警告（`WARN`），不判失败**：如果 `assert_row_count` /
+`assert_headers` / `assert_no_render_garbage` 这类"页面内容本身对不对"的
+断言都通过了，说明用户看到的东西没问题，一条无关的资源报错（比如某张图片
+404）不该让整条用例变红。`WARN` 计入通过数，报告里用黄色徽标单独标出，
+不影响通过率。
+
+真正内容不对（行数不对、表头缺列、渲染出乱码）导致断言失败时，失败消息
+会自动带上当时的控制台/网络错误做上下文（`_diag_suffix`），不需要靠
+`assert_no_console_error` 单独失败来定位——这样"页面出不来"时能看到线索，
+"页面没问题"时不会被无关报错拖累。
 
 ### 4.4 导出验证
 

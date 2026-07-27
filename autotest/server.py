@@ -312,17 +312,30 @@ def list_reports(limit=50):
             continue
         item = {"dir": d.name, "url": f"/reports/{d.name}/report.html",
                 "time": tz.from_ts(d.stat().st_mtime).strftime("%Y-%m-%d %H:%M"),
-                "passed": None, "failed": None, "total": None}
+                "passed": None, "failed": None, "total": None, "pages": []}
         # 从 result.json 读汇总，读不到就只显示时间
         rj = d / "result.json"
         if rj.exists():
             try:
-                data = json.loads(rj.read_text(encoding="utf-8"))
-                cases = data[0].get("cases", []) if data else []
-                item["total"] = len(cases)
-                item["passed"] = sum(1 for c in cases if c.get("status") == "pass")
-                item["failed"] = sum(1 for c in cases
+                data = json.loads(rj.read_text(encoding="utf-8")) or []
+                # result.json 是个列表，一个页面一条——批量执行会有多条，之前只看
+                # data[0]，批量跑多个页面时统计和页面列表都只反映第一个页面。
+                all_cases, pages = [], []
+                for pr in data:
+                    cases = pr.get("cases", [])
+                    all_cases.extend(cases)
+                    pages.append({
+                        "name": pr.get("name", "未命名页面"),
+                        "passed": sum(1 for c in cases if c.get("status") in ("pass", "warn")),
+                        "failed": sum(1 for c in cases if c.get("status") in ("fail", "error")),
+                        "total": len(cases),
+                    })
+                item["total"] = len(all_cases)
+                # warn 不算失败：页面内容本身没问题的报错不该拖低通过数
+                item["passed"] = sum(1 for c in all_cases if c.get("status") in ("pass", "warn"))
+                item["failed"] = sum(1 for c in all_cases
                                      if c.get("status") in ("fail", "error"))
+                item["pages"] = pages
             except Exception:
                 pass
         out.append(item)

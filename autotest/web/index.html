@@ -124,6 +124,8 @@ td{padding:9px 15px;border-bottom:1px solid #f0f2f5}
 tr:last-child td{border-bottom:none}
 tbody tr:hover{background:#f8fafc}
 td.time{color:var(--ink-2);font-size:12.5px;white-space:nowrap}
+.rep-pages{font-size:11px;color:var(--ink-3);margin-top:3px;max-width:200px;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .tally{display:flex;gap:5px;align-items:center;font-size:12.5px}
 .tally b{font-weight:600} .tally .p{color:var(--pass)} .tally .f{color:var(--fail)}
 .tally .slash{color:var(--line)}
@@ -431,6 +433,7 @@ $('#yamlSave').onclick=async()=>{const i=+$('#yamlMask').dataset.i,p=pages[i];if
 function lineClass(s){
   if(s.indexOf('✓')>=0||/通过 \d/.test(s)) return 'l-pass';
   if(s.indexOf('✗')>=0||s.indexOf('失败')>=0||s.indexOf('Error')>=0||s.indexOf('Traceback')>=0) return 'l-fail';
+  if(s.indexOf('⚠')>=0) return 'l-warn';
   if(/^\s*[└·]/.test(s)) return 'l-dim';
   if(/^\s*\[\d+\/\d+\]/.test(s)||s.indexOf('全部完成')>=0||s.indexOf('报告:')>=0||
      s.indexOf('执行 ')===0||s.indexOf('扫描 ')===0||s.indexOf('发现 ')===0) return 'l-head';
@@ -472,6 +475,13 @@ function applyProgress(p){
 }
 function hideProgress(){$('#termProg').style.display='none';$('#tpFill').style.width='0';}
 function applyProgressJSON(s){try{applyProgress(JSON.parse(s));}catch(_){}}
+function pageSummaryHtml(pages){
+  if(!pages||!pages.length) return '';
+  const names=pages.map(p=>p.name);
+  const label=names.length<=3?names.join('、'):names.slice(0,3).join('、')+' 等 '+names.length+' 个页面';
+  const title=pages.map(p=>p.name+'：'+p.passed+'/'+p.total+' 通过'+(p.failed?'（'+p.failed+' 失败）':'')).join('\n');
+  return '<div class="rep-pages" title="'+esc(title)+'">'+esc(label)+'</div>';
+}
 async function loadReports(){
   const rs=await get('/api/reports');
   $('#repCount').textContent=rs.length?'共 '+rs.length+' 次':'';
@@ -487,7 +497,7 @@ async function loadReports(){
       cell='<div class="tally">'+s+'</div><div class="bar"><i class="'+
            (r.failed?'has-fail':'')+'" style="width:100%;--w:'+pct+'%"></i></div>';
     }
-    h+='<tr><td class="time">'+r.time+'</td><td>'+cell+
+    h+='<tr><td class="time">'+r.time+pageSummaryHtml(r.pages)+'</td><td>'+cell+
        '</td><td style="text-align:right;white-space:nowrap">'+
        '<a class="open" href="'+r.url+'" target="_blank">查看</a>'+
        ' <button class="danger sm" type="button" data-rep-del="'+esc(r.dir)+'">删除</button></td></tr>';

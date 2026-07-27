@@ -19,7 +19,7 @@ h1{font-size:20px;margin:0 0 4px}
 border:1px solid #e6e8eb}
 .card .n{font-size:26px;font-weight:600;line-height:1.2}
 .card .l{font-size:12px;color:#8a9099;margin-top:2px}
-.pass .n{color:#00a870}.fail .n{color:#e34d59}.skip .n{color:#bbc0c6}
+.pass .n{color:#00a870}.fail .n{color:#e34d59}.skip .n{color:#bbc0c6}.warn .n{color:#e6a23c}
 .page{background:#fff;border:1px solid #e6e8eb;border-radius:8px;margin-bottom:16px;
 overflow:hidden}
 .page>h2{font-size:15px;margin:0;padding:14px 18px;border-bottom:1px solid #eef0f2}
@@ -32,6 +32,7 @@ gap:10px;font-size:14px;list-style:none}
 .case>summary:hover{background:#fafbfc}
 .badge{font-size:11px;padding:2px 8px;border-radius:10px;font-weight:500}
 .b-pass{background:#e3f9f0;color:#00a870}
+.b-warn{background:#fdf3e2;color:#e6a23c}
 .b-fail{background:#fdeaec;color:#e34d59}
 .b-error{background:#fff1e0;color:#e37318}
 .b-skip{background:#f3f4f6;color:#8a9099}
@@ -44,6 +45,7 @@ border-bottom:1px dashed #eef0f2;align-items:flex-start}
 .act{font-family:ui-monospace,Menlo,monospace;color:#0052d9;flex:0 0 auto;font-size:12px}
 .msg{color:#4b5158;word-break:break-all;flex:1}
 .msg.err{color:#e34d59}
+.msg.warn{color:#b8860b}
 .shot{display:block;margin-top:8px;max-width:520px;border:1px solid #e6e8eb;border-radius:4px}
 """
 
@@ -54,8 +56,9 @@ def _badge(s: Status) -> str:
 
 def render(results: List[PageResult], out_path: str) -> str:
     total = sum(len(r.cases) for r in results)
-    passed = sum(r.passed for r in results)
+    passed = sum(r.passed for r in results)         # 含 WARN：页面内容本身没问题就算通过
     failed = sum(r.failed for r in results)
+    warned = sum(1 for r in results for c in r.cases if c.status == Status.WARN)
     skipped = total - passed - failed
     ms = sum(r.duration_ms for r in results)
 
@@ -68,6 +71,7 @@ def render(results: List[PageResult], out_path: str) -> str:
 <div class="card pass"><div class="n">{passed}</div><div class="l">通过</div></div>
 <div class="card fail"><div class="n">{failed}</div><div class="l">失败</div></div>
 <div class="card skip"><div class="n">{skipped}</div><div class="l">跳过</div></div>
+<div class="card warn"><div class="n">{warned}</div><div class="l">其中有警告</div></div>
 <div class="card"><div class="n">{(passed/total*100 if total else 0):.0f}%</div>
 <div class="l">通过率</div></div>
 </div>"""]
@@ -81,8 +85,9 @@ def render(results: List[PageResult], out_path: str) -> str:
                          f'<span>{html.escape(c.name)}</span>'
                          f'<span class="ms">{c.duration_ms}ms</span></summary><div class="steps">')
             for s in c.steps:
-                ico = {"pass": "✓", "fail": "✗", "error": "!", "skip": "-"}[s.status.value]
-                cls = " err" if s.status != Status.PASS else ""
+                ico = {"pass": "✓", "warn": "⚠", "fail": "✗", "error": "!", "skip": "-"}[s.status.value]
+                cls = " err" if s.status in (Status.FAIL, Status.ERROR) else \
+                      (" warn" if s.status == Status.WARN else "")
                 parts.append(f'<div class="step"><span class="ico">{ico}</span>'
                              f'<span class="act">{html.escape(s.action)}</span>'
                              f'<span class="msg{cls}">{html.escape(s.message)}')

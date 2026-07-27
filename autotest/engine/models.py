@@ -6,6 +6,7 @@ from enum import Enum
 
 class Status(str, Enum):
     PASS = "pass"
+    WARN = "warn"    # 检测到问题但不算失败（比如页面显示正常时的控制台报错）
     FAIL = "fail"
     ERROR = "error"
     SKIP = "skip"
@@ -81,7 +82,7 @@ class PageResult:
 
     @property
     def passed(self) -> int:
-        return sum(1 for c in self.cases if c.status == Status.PASS)
+        return sum(1 for c in self.cases if c.status in (Status.PASS, Status.WARN))
 
     @property
     def failed(self) -> int:

@@ -192,7 +192,7 @@ def run_selected(dir_name: str, out_dir: str,
 
             for ci, case in enumerate(cases, 1):
                 cr = run_case(ctx, case)
-                icon = {"pass": "✓", "fail": "✗", "error": "!", "skip": "-"}[cr.status.value]
+                icon = {"pass": "✓", "warn": "⚠", "fail": "✗", "error": "!", "skip": "-"}[cr.status.value]
                 _log(on_log, f"  ▶ {case.name} ... {icon} ({cr.duration_ms}ms)")
                 if cr.status != Status.PASS:
                     tail = cr.steps[-1].message if cr.steps else cr.error
