@@ -2,9 +2,9 @@
 import html
 import json
 import os
-from datetime import datetime
 from typing import List
 
+from . import tz
 from .models import PageResult, Status
 
 CSS = """
@@ -62,7 +62,7 @@ def render(results: List[PageResult], out_path: str) -> str:
     parts = [f"""<!DOCTYPE html><html lang="zh-CN"><head><meta charset="utf-8">
 <title>自动化测试报告</title><style>{CSS}</style></head><body><div class="wrap">
 <h1>自动化数据验证报告</h1>
-<div class="sub">{datetime.now():%Y-%m-%d %H:%M:%S} · 耗时 {ms/1000:.1f}s</div>
+<div class="sub">{tz.now():%Y-%m-%d %H:%M:%S} · 耗时 {ms/1000:.1f}s</div>
 <div class="cards">
 <div class="card"><div class="n">{total}</div><div class="l">用例总数</div></div>
 <div class="card pass"><div class="n">{passed}</div><div class="l">通过</div></div>

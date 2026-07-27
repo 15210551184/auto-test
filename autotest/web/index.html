@@ -488,9 +488,22 @@ async function loadReports(){
            (r.failed?'has-fail':'')+'" style="width:100%;--w:'+pct+'%"></i></div>';
     }
     h+='<tr><td class="time">'+r.time+'</td><td>'+cell+
-       '</td><td style="text-align:right"><a class="open" href="'+r.url+'" target="_blank">查看</a></td></tr>';
+       '</td><td style="text-align:right;white-space:nowrap">'+
+       '<a class="open" href="'+r.url+'" target="_blank">查看</a>'+
+       ' <button class="danger sm" type="button" data-rep-del="'+esc(r.dir)+'">删除</button></td></tr>';
   });
   $('#repWrap').innerHTML=h+'</tbody></table>';
+  $('#repWrap').querySelectorAll('[data-rep-del]').forEach(btn=>{
+    btn.onclick=async()=>{
+      const dir=btn.dataset.repDel;
+      if(!confirm('删除这份报告吗？报告文件（含截图、导出的文件）会一并删除，无法恢复。'))return;
+      const r=await fetch('/api/reports/'+encodeURIComponent(dir),{method:'DELETE'});
+      const data=await r.json().catch(()=>({}));
+      if(!r.ok||!data.ok) return toast(data.msg||'删除失败',true);
+      toast('已删除该报告');
+      loadReports();
+    };
+  });
 }
 async function trigger(action, overwrite=false){
   if(!proj) return toast('请先选择或新建一个系统',true);

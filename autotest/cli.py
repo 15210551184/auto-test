@@ -12,13 +12,13 @@ import argparse
 import json
 import os
 import sys
-from datetime import datetime
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from engine import report as R
 from engine import scanner
 from engine import batch, project as P
+from engine import tz
 from engine.crawler import discover
 from engine.login import load_dotenv
 from engine.runner import load_config, run_page, save_login_state
@@ -29,7 +29,7 @@ load_dotenv("runtime/.env")
 
 
 def _outdir(tag: str) -> str:
-    d = os.path.join("reports", f"{datetime.now():%Y%m%d_%H%M%S}_{tag}")
+    d = os.path.join("reports", f"{tz.now():%Y%m%d_%H%M%S}_{tag}")
     os.makedirs(d, exist_ok=True)
     return d
 

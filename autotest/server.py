@@ -12,11 +12,12 @@ import os
 import queue
 import re
 import secrets
+import shutil
 import subprocess
 import sys
 import threading
 import time
-from datetime import datetime, timedelta
+from datetime import timedelta
 from pathlib import Path
 from urllib.parse import quote
 
@@ -24,6 +25,7 @@ from flask import (Flask, Response, jsonify, redirect, render_template_string,
                     request, send_from_directory, session)
 
 from engine import project as P
+from engine import tz
 from engine.explain import explain_config
 from engine.login import load_dotenv
 
@@ -309,7 +311,7 @@ def list_reports(limit=50):
         if not d.is_dir() or not (d / "report.html").exists():
             continue
         item = {"dir": d.name, "url": f"/reports/{d.name}/report.html",
-                "time": datetime.fromtimestamp(d.stat().st_mtime).strftime("%Y-%m-%d %H:%M"),
+                "time": tz.from_ts(d.stat().st_mtime).strftime("%Y-%m-%d %H:%M"),
                 "passed": None, "failed": None, "total": None}
         # 从 result.json 读汇总，读不到就只显示时间
         rj = d / "result.json"
@@ -338,6 +340,19 @@ def api_configs():
 @app.get("/api/reports")
 def api_reports():
     return jsonify(list_reports())
+
+
+@app.delete("/api/reports/<dirname>")
+def api_delete_report(dirname):
+    # 报告目录名只可能是 _outdir() 生成的时间戳+标签，这里仍按路径穿越场景校验，
+    # 不信任 URL 里的原始输入
+    if "/" in dirname or "\\" in dirname or ".." in dirname:
+        return jsonify({"ok": False, "msg": "报告目录名不合法"}), 400
+    d = REPORT_DIR / dirname
+    if not d.is_dir() or not (d / "report.html").exists():
+        return jsonify({"ok": False, "msg": "报告不存在"}), 404
+    shutil.rmtree(d)
+    return jsonify({"ok": True})
 
 
 @app.get("/api/status")
