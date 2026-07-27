@@ -84,6 +84,16 @@ button.danger:hover:not(:disabled){background:#fdeced}
 .term-head{display:flex;align-items:center;gap:10px;width:100%}
 .term-head .job{color:#c8d2df;font-size:12px;letter-spacing:0;text-transform:none;font-weight:400}
 .term-head .elapsed{margin-left:auto;color:#5e6a7a;font-size:11px;letter-spacing:0;text-transform:none}
+.term-prog{padding:10px 15px;border-bottom:1px solid #252c36;background:var(--term-bg)}
+.tp-text{display:flex;justify-content:space-between;gap:12px;font-size:12px;
+  color:#9aa6b5;margin-bottom:6px}
+.tp-text #tpCount{color:#7fb0ff;white-space:nowrap}
+.tp-bar{height:6px;border-radius:3px;background:#252c36;overflow:hidden}
+.tp-bar i{display:block;height:100%;width:0;border-radius:3px;
+  background:linear-gradient(90deg,#2f6fed,#4fce9b);transition:width .3s ease}
+.tp-bar.indet i{width:35%!important;transition:none;
+  animation:indet 1.1s ease-in-out infinite}
+@keyframes indet{0%{margin-left:-35%}100%{margin-left:100%}}
 .term{padding:12px 15px;height:300px;overflow-y:auto;font-size:12.5px;line-height:1.65;
   color:var(--term-fg);white-space:pre-wrap;word-break:break-all}
 .term::-webkit-scrollbar{width:9px}
@@ -161,6 +171,10 @@ a.open:hover{text-decoration:underline}
         <span>运行日志</span><span class="job" id="jobName"></span>
         <span class="elapsed" id="elapsed"></span>
       </div></h2>
+      <div class="term-prog" id="termProg" style="display:none">
+        <div class="tp-text"><span id="tpLabel"></span><span id="tpCount"></span></div>
+        <div class="tp-bar"><i id="tpFill"></i></div>
+      </div>
       <div class="term" id="term"><span class="empty">暂无运行记录。</span></div>
       <div class="term-foot">
         <label><input type="checkbox" id="autoscroll" checked> 自动滚动</label>
@@ -360,6 +374,35 @@ function appendLine(s){
   if(c)d.className=c; d.textContent=s; term.appendChild(d);
   if($('#autoscroll').checked) term.scrollTop=term.scrollHeight;
 }
+const PROG_PREFIX='__PROGRESS__';
+function applyProgress(p){
+  if(!p)return;
+  $('#termProg').style.display='block';
+  const bar=$('#termProg').querySelector('.tp-bar'), fill=$('#tpFill');
+  const phase={scan:'扫描',run:'执行',menu:'扫描菜单'}[p.phase]||'执行';
+  if(!p.pages){                       // 不定量阶段（如展开菜单树）：跑马灯
+    bar.classList.add('indet');
+    $('#tpLabel').textContent=phase+(p.page_name?' · '+p.page_name:'');
+    $('#tpCount').textContent='';
+    return;
+  }
+  bar.classList.remove('indet');
+  let frac=(p.page-1)/p.pages;
+  if(p.cases){frac=((p.page-1)+(p.case||0)/p.cases)/p.pages;}
+  const pct=Math.min(100,Math.max(2,Math.round(frac*100)));
+  $('#tpLabel').textContent=phase+' · 第 '+p.page+'/'+p.pages+' 页'+
+    (p.page_name?' · '+p.page_name:'');
+  const bits=[];
+  if(p.cases)bits.push('用例 '+(p.case||0)+'/'+p.cases);
+  if(p.passed!=null)bits.push('通过 '+p.passed);
+  if(p.failed!=null)bits.push('失败 '+p.failed);
+  $('#tpCount').textContent=bits.join(' · ');
+  fill.style.width=pct+'%';
+  fill.style.background=p.failed?'linear-gradient(90deg,#2f6fed,#ff7b85)'
+                                :'linear-gradient(90deg,#2f6fed,#4fce9b)';
+}
+function hideProgress(){$('#termProg').style.display='none';$('#tpFill').style.width='0';}
+function applyProgressJSON(s){try{applyProgress(JSON.parse(s));}catch(_){}}
 async function loadReports(){
   const rs=await get('/api/reports');
   $('#repCount').textContent=rs.length?'共 '+rs.length+' 次':'';
@@ -389,7 +432,7 @@ async function trigger(action, overwrite=false){
     return toast('勾选的页面还没有用例，请先点「生成用例」',true);
   const r=await post('/api/run',{action:action,project:proj.dir,overwrite:overwrite});
   if(!r.ok||!r.data.ok) return toast(r.data.msg||'启动失败',true);
-  term.innerHTML='';everStreamed=true;setBusy(true);
+  term.innerHTML='';everStreamed=true;hideProgress();setBusy(true);
 }
 $('#btnDiscover').onclick=()=>trigger('discover');
 $('#btnGen').onclick=()=>trigger('batch-scan');
@@ -397,7 +440,7 @@ $('#btnRegen').onclick=()=>{if(confirm('重新生成会覆盖当前已勾选页�
 $('#btnRunSel').onclick=()=>trigger('batch-run');
 $('#btnStop').onclick=async()=>{const r=await post('/api/stop');
   toast(r.data.ok?'已发送终止信号':'当前没有运行中的任务',!r.data.ok);};
-$('#btnClear').onclick=()=>{term.innerHTML='<span class="empty">日志已清空。</span>';everStreamed=false;};
+$('#btnClear').onclick=()=>{term.innerHTML='<span class="empty">日志已清空。</span>';everStreamed=false;hideProgress();};
 function setBusy(b){
   ['#btnDiscover','#btnGen','#btnRegen','#btnRunSel','#btnNewProj'].forEach(s=>$(s).disabled=b);
   $('#btnStop').disabled=!b;
@@ -421,11 +464,13 @@ $('#npOk').onclick=async()=>{
 function connect(){
   const es=new EventSource('/api/stream');
   es.onmessage=e=>{const l=JSON.parse(e.data);
+    if(typeof l==='string'&&l.startsWith(PROG_PREFIX)){
+      applyProgressJSON(l.slice(PROG_PREFIX.length).trim());return;}
     if(l==='__DONE__'){finish();return;} appendLine(l);};
   es.onerror=()=>{es.close();setTimeout(connect,3000);};
 }
 async function finish(){
-  const st=await get('/api/status'); setBusy(false);
+  const st=await get('/api/status'); setBusy(false); hideProgress();
   setState(st.returncode===0?'ok':'bad',
     st.returncode===0?'完成 · '+st.elapsed+'s':'有失败 · '+st.elapsed+'s');
   $('#elapsed').textContent='';
@@ -441,7 +486,8 @@ async function finish(){
 async function poll(){
   const st=await get('/api/status');
   $('#jobName').textContent=st.name||'';
-  if(st.running){setBusy(true);$('#elapsed').textContent=st.elapsed+'s';}
+  if(st.running){setBusy(true);$('#elapsed').textContent=st.elapsed+'s';
+    if(st.progress)applyProgressJSON(st.progress);}
   return st;
 }
 (async function init(){
@@ -449,8 +495,9 @@ async function poll(){
   const st=await poll();
   if(st.lines&&st.lines.length){
     term.innerHTML='';everStreamed=true;
-    st.lines.forEach(l=>{if(l!=='__DONE__')appendLine(l);});
+    st.lines.forEach(l=>{if(l!=='__DONE__'&&!(typeof l==='string'&&l.startsWith(PROG_PREFIX)))appendLine(l);});
   }
+  if(st.running&&st.progress)applyProgressJSON(st.progress);
   if(!st.running&&st.returncode!==null)
     setState(st.returncode===0?'ok':'bad',st.returncode===0?'上次全部通过':'上次有失败');
   connect();

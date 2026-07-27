@@ -13,6 +13,7 @@ import yaml
 from playwright.sync_api import sync_playwright, Page
 
 from . import browser as B
+from . import progress
 from .actions import REGISTRY, AssertionFailed
 from .login import LoginError, ensure_logged_in, is_login_page, load_dotenv
 from .adapters.element_ui import ElementUIAdapter
@@ -224,7 +225,7 @@ def run_page(config: PageConfig, out_dir: str, headless: bool = True,
         if only_tags:
             cases = [c for c in cases if set(c.tags) & set(only_tags)]
 
-        for case in cases:
+        for ci, case in enumerate(cases, 1):
             print(f"  ▶ {case.name} ... ", end="", flush=True)
             cr = run_case(ctx, case)
             icon = {"pass": "✓", "fail": "✗", "error": "!", "skip": "-"}[cr.status.value]
@@ -232,6 +233,9 @@ def run_page(config: PageConfig, out_dir: str, headless: bool = True,
             if cr.status != Status.PASS and cr.steps:
                 print(f"     └ {cr.steps[-1].message[:160]}")
             result.cases.append(cr)
+            progress.emit(phase="run", page=1, pages=1, page_name=config.name,
+                          case=ci, cases=len(cases),
+                          passed=result.passed, failed=result.failed)
 
         browser.close()
 

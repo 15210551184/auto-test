@@ -20,6 +20,7 @@ from urllib.parse import urlparse
 from playwright.sync_api import Page, sync_playwright
 
 from . import browser as B
+from . import progress
 from .login import ensure_logged_in, is_login_page
 from .state import save_storage_state, valid_storage_state
 
@@ -278,6 +279,8 @@ def crawl_menu(page: Page, home_url: str, max_pages: int = 60,
     """
     page.goto(home_url, wait_until="domcontentloaded", timeout=60000)
     page.wait_for_timeout(2000)
+    # 收集阶段总数未知，发一条不定量进度让界面有反馈
+    progress.emit(phase="menu", page_name="正在展开菜单树…")
     leaves = _collect_all_leaves(page, on_progress)
     _progress(on_progress, f"菜单收集完成，共 {len(leaves)} 个候选页面；开始逐页探测")
 
@@ -287,9 +290,11 @@ def crawl_menu(page: Page, home_url: str, max_pages: int = 60,
     # 逐个点击，记录 URL
     out = []
     seen_url: Set[str] = set()
+    total = min(len(leaves), max_pages)
     for index, leaf in enumerate(leaves[:max_pages], 1):
         name = leaf["name"]
-        _progress(on_progress, f"探测页面 {index}/{min(len(leaves), max_pages)}：{name}")
+        progress.emit(phase="menu", page=index, pages=total, page_name=name)
+        _progress(on_progress, f"探测页面 {index}/{total}：{name}")
         try:
             direct_url = _route_url(home_url, leaf.get("menu_route"))
             if direct_url:

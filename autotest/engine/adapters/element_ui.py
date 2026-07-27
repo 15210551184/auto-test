@@ -116,19 +116,35 @@ class ElementUIAdapter:
         page.keyboard.press("Escape")
 
     # ---------- 表格 ----------
+    # 一次 evaluate 把整张表读进来，避免 rows×cols 次 .nth().inner_text() 往返——
+    # 这是执行期最大的性能热点：capture / 各列断言 / 导出比对全走这里。
+    # 固定列会让 Element 多渲染一份表头和表体（主表 + 左/右固定），只取「第一个」
+    # header-wrapper / body-wrapper（主表），既去掉重复列又和下标严格对齐。
+    _READ_JS = r"""
+    (el) => {
+      const clean = s => (s || '').replace(/\s+/g, ' ').trim();
+      const hw = el.querySelector('.el-table__header-wrapper') || el;
+      let hc = [...hw.querySelectorAll('th .cell')];
+      if (!hc.length) hc = [...hw.querySelectorAll('thead th, th')];
+      const headers = hc.map(clean);
+      const bw = el.querySelector('.el-table__body-wrapper') || el;
+      const rows = [...bw.querySelectorAll('tbody tr.el-table__row, tbody tr')]
+        .map(tr => [...tr.querySelectorAll('td')].map(td => clean(td.innerText)));
+      return {headers, rows};
+    }
+    """
+
+    def _read(self, page: Page, table: str = ".el-table") -> dict:
+        return page.locator(table).first.evaluate(self._READ_JS)
+
     def headers(self, page: Page, table: str = ".el-table") -> List[str]:
-        """
-        固定列会让 Element 渲染出多份 header（主表 + 左固定 + 右固定），
-        只取主表的 header-wrapper，避免列名重复。
-        """
-        tbl = page.locator(table).first
-        hdr = tbl.locator(".el-table__header-wrapper th .cell")
-        texts = [t.strip() for t in hdr.all_inner_texts()]
-        return [t for t in texts if t]
+        return [t for t in self._read(page, table)["headers"] if t]
 
     def rows(self, page: Page, table: str = ".el-table") -> Locator:
+        """行的 Locator，仅用于计数/翻页判断；取值请走 table_data/column_values。"""
         tbl = page.locator(table).first
-        return tbl.locator(".el-table__body-wrapper tbody tr.el-table__row")
+        return tbl.locator(".el-table__body-wrapper").first.locator(
+            "tbody tr.el-table__row")
 
     def row_count(self, page: Page, table: str = ".el-table") -> int:
         return self.rows(page, table).count()
@@ -144,34 +160,26 @@ class ElementUIAdapter:
         return hs.index(column)
 
     def column_values(self, page: Page, column: str, table: str = ".el-table") -> List[str]:
-        """
-        按列索引取值而不是按文本匹配单元格。
-        列多时会横向滚动，但 DOM 里所有 td 都在，不需要滚动。
-        """
-        idx = self.column_index(page, column, table)
-        rows = self.rows(page, table)
-        n = rows.count()
-        out = []
-        for i in range(n):
-            cells = rows.nth(i).locator("td")
-            if cells.count() <= idx:
-                out.append("")
-                continue
-            out.append(cells.nth(idx).inner_text().strip())
-        return out
+        data = self._read(page, table)
+        headers = [t for t in data["headers"] if t]
+        if column not in headers:
+            raise LookupError(f"表头没有列 '{column}'，实际表头: {headers}")
+        # 空表头列会被过滤，导致过滤后的下标与 td 下标错位；用原始表头定位真实列位置
+        idx = data["headers"].index(column)
+        return [cells[idx] if idx < len(cells) else "" for cells in data["rows"]]
 
     def table_data(self, page: Page, table: str = ".el-table") -> List[dict]:
-        """整张表抓成 list[dict]，用于和导出文件比对"""
-        hs = self.headers(page, table)
-        rows = self.rows(page, table)
-        data = []
-        for i in range(rows.count()):
-            cells = rows.nth(i).locator("td")
+        """整张表抓成 list[dict]，用于和导出文件比对。一次 evaluate 读完。"""
+        data = self._read(page, table)
+        raw_headers = data["headers"]
+        out = []
+        for cells in data["rows"]:
             row = {}
-            for j, h in enumerate(hs):
-                row[h] = cells.nth(j).inner_text().strip() if j < cells.count() else ""
-            data.append(row)
-        return data
+            for j, h in enumerate(raw_headers):
+                if h:  # 跳过复选框/展开等空表头列，但下标 j 仍对齐 td
+                    row[h] = cells[j] if j < len(cells) else ""
+            out.append(row)
+        return out
 
     # ---------- 分页 ----------
     def total_count(self, page: Page) -> Optional[int]:
@@ -215,3 +223,68 @@ class ElementUIAdapter:
     def dialog(self, page: Page) -> Locator:
         """当前可见的弹窗（新增/编辑表单通常在这里面）"""
         return page.locator(".el-dialog__wrapper:visible .el-dialog, .el-drawer:visible").last
+
+    # ---------- 按钮巡检 ----------
+    # 破坏性操作的关键词，巡检时只确认"存在且可点"，绝不真的点下去
+    DESTRUCTIVE = ["删除", "移除", "停用", "禁用", "作废", "清空", "注销", "解绑",
+                   "设为失效", "失效", "撤销", "驳回", "重置密码"]
+
+    def toolbar_button_texts(self, page: Page) -> List[str]:
+        """
+        枚举页面工具栏上可见的操作按钮文本（去重、保持顺序）。
+        刻意排除表格行内按钮、弹窗内按钮、分页器按钮——行内操作属于第二期，
+        弹窗/分页按钮点了会产生噪声。用 closest 判断祖先容器，比 CSS 选择器可靠。
+        """
+        return page.evaluate(
+            r"""() => {
+              const inExcluded = el => !!el.closest(
+                '.el-table, .el-dialog, .el-drawer, .el-pagination, .el-message-box');
+              const seen = new Set(), out = [];
+              document.querySelectorAll('button, a.el-button, .el-button').forEach(b => {
+                const r = b.getBoundingClientRect();
+                const st = getComputedStyle(b);
+                if (r.width <= 0 || r.height <= 0 || st.visibility === 'hidden' || st.display === 'none') return;
+                if (inExcluded(b)) return;
+                const t = (b.innerText || '').replace(/\s+/g, '').trim();
+                if (t && !seen.has(t)) { seen.add(t); out.push(t); }
+              });
+              return out;
+            }"""
+        )
+
+    def button(self, page: Page, text: str) -> Locator:
+        """按文本定位工具栏按钮（排除表格行内的同名按钮）。"""
+        exact = re.compile(rf"^\s*{re.escape(text)}\s*$")
+        return page.locator("button, a.el-button, .el-button").filter(has_text=exact).filter(
+            has_not=page.locator("xpath=ancestor::*[contains(@class,'el-table')]")).first
+
+    def dialog_visible(self, page: Page) -> bool:
+        for sel in (".el-dialog:visible", ".el-drawer:visible", ".el-message-box:visible"):
+            try:
+                if page.locator(sel).count() > 0:
+                    return True
+            except Exception:
+                continue
+        return False
+
+    def close_dialog(self, page: Page) -> None:
+        """尽量关掉当前可见的弹窗/抽屉/确认框：优先取消/关闭按钮，兜底按 Esc。"""
+        for sel in (".el-dialog:visible .el-dialog__headerbtn",
+                    ".el-drawer:visible .el-drawer__close-btn",
+                    ".el-message-box:visible .el-button:not(.el-button--primary)",
+                    ".el-dialog:visible .el-button:has-text('取消')",
+                    ".el-dialog:visible .el-button:has-text('关闭')"):
+            try:
+                loc = page.locator(sel).first
+                if loc.count() > 0 and loc.is_visible():
+                    loc.click(timeout=2000)
+                    page.wait_for_timeout(300)
+                    if not self.dialog_visible(page):
+                        return
+            except Exception:
+                continue
+        try:
+            page.keyboard.press("Escape")
+            page.wait_for_timeout(300)
+        except Exception:
+            pass

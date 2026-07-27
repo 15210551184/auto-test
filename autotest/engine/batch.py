@@ -16,6 +16,7 @@ import yaml
 from playwright.sync_api import sync_playwright
 
 from . import browser as B
+from . import progress
 from . import project as P
 from . import scanner
 from .login import LoginError, ensure_logged_in, is_login_page
@@ -81,6 +82,7 @@ def scan_selected(dir_name: str, storage_state: Optional[str] = None,
 
     for i, pg in enumerate(pages, 1):
         name, url = pg["name"], pg.get("url")
+        progress.emit(phase="scan", page=i, pages=len(pages), page_name=name)
         dest = P.page_config_path(dir_name, name)
         if not url:
             _log(on_log, f"  [{i}/{len(pages)}] {name} — 跳过（没有 URL）")
@@ -163,9 +165,12 @@ def run_selected(dir_name: str, out_dir: str,
                 pr.cases.append(CaseResult("登录", Status.ERROR, error=str(e)))
                 return [pr]
 
+        done_p, done_f = 0, 0
         for idx, (name, cfg_path) in enumerate(targets, 1):
             t0 = time.time()
             _log(on_log, f"\n[{idx}/{len(targets)}] {name}")
+            progress.emit(phase="run", page=idx, pages=len(targets), page_name=name,
+                          passed=done_p, failed=done_f)
             try:
                 cfg = load_config(str(cfg_path))
             except Exception as e:
@@ -173,6 +178,7 @@ def run_selected(dir_name: str, out_dir: str,
                 pr = PageResult(name, "")
                 pr.cases.append(CaseResult("配置", Status.ERROR, error=str(e)))
                 results.append(pr)
+                done_f += 1
                 continue
 
             page_out = os.path.join(out_dir, f"{idx:02d}_{P._safe(name)}")
@@ -184,7 +190,7 @@ def run_selected(dir_name: str, out_dir: str,
             if only_tags:
                 cases = [c for c in cases if set(c.tags) & set(only_tags)]
 
-            for case in cases:
+            for ci, case in enumerate(cases, 1):
                 cr = run_case(ctx, case)
                 icon = {"pass": "✓", "fail": "✗", "error": "!", "skip": "-"}[cr.status.value]
                 _log(on_log, f"  ▶ {case.name} ... {icon} ({cr.duration_ms}ms)")
@@ -193,10 +199,15 @@ def run_selected(dir_name: str, out_dir: str,
                     if tail:
                         _log(on_log, f"     └ {tail[:160]}")
                 pr.cases.append(cr)
+                progress.emit(phase="run", page=idx, pages=len(targets), page_name=name,
+                              case=ci, cases=len(cases),
+                              passed=done_p + pr.passed, failed=done_f + pr.failed)
 
             pr.duration_ms = int((time.time() - t0) * 1000)
             _log(on_log, f"  小计：通过 {pr.passed} / 失败 {pr.failed}")
             results.append(pr)
+            done_p += pr.passed
+            done_f += pr.failed
 
         save_storage_state(bctx, storage_state, on_log)
         browser.close()

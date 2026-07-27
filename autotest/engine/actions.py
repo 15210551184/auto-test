@@ -118,6 +118,159 @@ def do_search(ctx, **kw):
     return "执行搜索"
 
 
+# ============ 第一期：全自动健康巡检 ============
+
+@action("check_buttons")
+def do_check_buttons(ctx, skip: list = None, max_buttons: int = 20, **kw):
+    """
+    巡检工具栏按钮是否可用。逐个点非破坏性按钮，检查：点得动、不报错、
+    弹窗能正常打开（随后关闭）、跳转后不是空白页。破坏性按钮（删除/停用等）
+    只确认存在且可点，绝不点下去。搜索/重置/导出有各自的专用用例，这里跳过
+    避免重复触发下载等副作用。
+    """
+    page, ui = ctx.page, ctx.ui
+    always_skip = {"导出", "下载", "搜索", "查询", "重置", "清空", "刷新"}
+    user_skip = set(skip or [])
+    texts = ui.toolbar_button_texts(page)
+    if not texts:
+        return "页面没有可巡检的工具栏按钮"
+
+    home = page.url
+    checked, dangerous, problems = [], [], []
+    for t in texts[:max_buttons]:
+        if t in always_skip or any(s in t for s in user_skip):
+            continue
+        if any(k in t for k in ui.DESTRUCTIVE):
+            btn = ui.button(page, t)
+            try:
+                if btn.count() == 0:
+                    continue
+                if btn.is_disabled():
+                    problems.append(f"'{t}' 处于禁用态")
+            except Exception:
+                pass
+            dangerous.append(t)
+            continue
+
+        btn = ui.button(page, t)
+        try:
+            if btn.count() == 0 or not btn.first.is_visible():
+                continue
+        except Exception:
+            continue
+
+        base_console = len(ctx.console_errors)
+        base_failed = len(ctx.failed_requests)
+        before = page.url
+        try:
+            btn.first.click(timeout=4000)
+        except Exception as e:
+            problems.append(f"'{t}' 点击失败: {type(e).__name__}")
+            continue
+        page.wait_for_timeout(700)
+
+        new_errs = [e for e in ctx.console_errors[base_console:]
+                    if "ResizeObserver" not in e and "favicon" not in e]
+        new_5xx = ctx.failed_requests[base_failed:]
+        if new_errs:
+            problems.append(f"'{t}' 触发前端报错: {new_errs[0][:120]}")
+        if new_5xx:
+            problems.append(f"'{t}' 触发失败请求: {new_5xx[0][:120]}")
+
+        if ui.dialog_visible(page):
+            ui.close_dialog(page)
+        elif page.url != before:
+            # 跳转了：确认新页面不是空白/错误页，然后退回
+            try:
+                body_len = len(page.locator("body").inner_text().strip())
+            except Exception:
+                body_len = 0
+            if body_len < 20:
+                problems.append(f"'{t}' 跳转后页面疑似空白")
+            try:
+                page.go_back(wait_until="domcontentloaded", timeout=15000)
+                page.wait_for_timeout(500)
+            except Exception:
+                pass
+            # 退不回原页就停止后续巡检，避免在错页上连锁误报
+            if page.url.split("?")[0] != home.split("?")[0]:
+                checked.append(t)
+                break
+        checked.append(t)
+
+    if problems:
+        _fail(f"按钮巡检发现 {len(problems)} 个问题: {problems[:5]}")
+    tail = f"（破坏性按钮仅确认存在: {dangerous}）" if dangerous else ""
+    return f"巡检 {len(checked)} 个按钮均正常 ✓{tail}"
+
+
+# 明显的渲染异常标记：整格等于这些值，说明前端没拿到/没处理好数据
+_GARBAGE_EXACT = {"undefined", "null", "nan", "none", "[object object]",
+                  "invalid date", "0000-00-00", "0000-00-00 00:00:00"}
+_GARBAGE_SUB = ("[object object]", "invalid date", "undefined")
+
+
+@action("assert_no_render_garbage")
+def as_no_render_garbage(ctx, columns: list = None, extra: list = None, **kw):
+    """
+    扫全表找渲染异常，零配置就能抓"接口对但前端展示错"那一类：
+    undefined/null/NaN/[object Object]/Invalid Date，以及时间列里的裸时间戳。
+    """
+    data = ctx.ui.table_data(ctx.page)
+    if not data:
+        return "列表为空，跳过渲染检查"
+    exact = set(_GARBAGE_EXACT) | {str(e).lower() for e in (extra or [])}
+    cols = columns or list(data[0].keys())
+    bad = []
+    for i, row in enumerate(data):
+        for c in cols:
+            if c not in row:
+                continue
+            s = N.text(row[c])
+            low = s.lower()
+            if low in exact or any(g in low for g in _GARBAGE_SUB):
+                bad.append(f"行{i+1} {c}='{s}'")
+            elif ("时间" in c or "日期" in c) and re.fullmatch(r"\d{10,13}", s):
+                bad.append(f"行{i+1} {c} 疑似未格式化时间戳='{s}'")
+    if bad:
+        _fail(f"列表有 {len(bad)} 处渲染异常: {bad[:5]}")
+    return f"渲染检查通过（{len(data)} 行 × {len(cols)} 列）✓"
+
+
+@action("check_select_options")
+def do_check_select_options(ctx, label: str = None, max_options: int = 6, **kw):
+    """
+    遍历一个下拉筛选的前 N 个选项，逐个选中+搜索，确认每个选项都能正常筛选、
+    不报错。比只测第一个选项更能抓到"某个状态码筛选后页面崩了"这类问题。
+    循环结束后 ${selected_label} 停在最后一个选项，供后续列断言复用。
+    """
+    page, ui = ctx.page, ctx.ui
+    opts = [o for o in ui.list_options(page, label)
+            if o and o not in ("全部", "请选择", "不限")][:max_options]
+    if not opts:
+        return f"下拉 '{label}' 无可选项，跳过"
+    problems = []
+    for o in opts:
+        base = len(ctx.console_errors)
+        try:
+            ui.select(page, label, option=o)
+        except Exception as e:
+            problems.append(f"选项 '{o}' 选择失败: {type(e).__name__}")
+            continue
+        try:
+            do_search(ctx)
+        except Exception as e:
+            problems.append(f"选项 '{o}' 搜索异常: {type(e).__name__}: {e}")
+            continue
+        errs = [e for e in ctx.console_errors[base:]
+                if "ResizeObserver" not in e and "favicon" not in e]
+        if errs:
+            problems.append(f"选项 '{o}' 触发报错: {errs[0][:100]}")
+    if problems:
+        _fail(f"下拉 '{label}' 有 {len(problems)} 个选项异常: {problems[:5]}")
+    return f"下拉 '{label}' 遍历 {len(opts)} 个选项均正常 ✓"
+
+
 @action("capture")
 def do_capture(ctx, name: str = "snapshot", value: str = None, **kw):
     """把当前表格快照存进变量池，供后面和导出文件比对"""

@@ -108,6 +108,7 @@ class Job:
         self.lines = []                # 完整日志，供刷新页面后回看
         self.subscribers = []          # SSE 订阅者队列
         self.report_url = None
+        self.progress = None           # 最近一条结构化进度（只留最新）
         self.proc = None
 
     def start(self, name: str, cmd: list) -> bool:
@@ -122,14 +123,18 @@ class Job:
             self.returncode = None
             self.lines = []
             self.report_url = None
+            self.progress = None
         threading.Thread(target=self._run, args=(cmd,), daemon=True).start()
         return True
 
     def _emit(self, line: str):
-        self.lines.append(line)
-        # 日志太长会撑爆内存，只留最近 2000 行
-        if len(self.lines) > 2000:
-            self.lines = self.lines[-2000:]
+        # 进度行只转发+留最新，不塞进日志缓冲（避免频繁进度把真实日志挤出 2000 行窗口）
+        if not line.startswith("__PROGRESS__"):
+            self.lines.append(line)
+            if len(self.lines) > 2000:   # 日志太长会撑爆内存，只留最近 2000 行
+                self.lines = self.lines[-2000:]
+        else:
+            self.progress = line[len("__PROGRESS__"):].strip()
         for q in list(self.subscribers):
             try:
                 q.put_nowait(line)
@@ -178,6 +183,7 @@ class Job:
                        if self.started else 0,
             "returncode": self.returncode,
             "report_url": self.report_url,
+            "progress": self.progress,
             "lines": self.lines[-500:],
         }
 

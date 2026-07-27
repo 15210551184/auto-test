@@ -179,7 +179,16 @@ def scan(url: str, storage_state: Optional[str] = None,
         page = bctx.new_page()
         sc = PageScanner(page)
         page.goto(url, wait_until="domcontentloaded", timeout=60000)
-        page.wait_for_timeout(wait)
+        # 不再一律死等 wait 毫秒：等到列表接口返回就继续，只留一小段渲染时间。
+        # 快页面从固定 3s 降到 ~接口耗时+600ms；慢页面仍最多等 wait 毫秒后兜底。
+        try:
+            page.wait_for_response(
+                lambda r: bool(re.search(r"/(api|web)/", r.url))
+                and "json" in (r.headers or {}).get("content-type", ""),
+                timeout=wait)
+            page.wait_for_timeout(600)
+        except Exception:
+            page.wait_for_timeout(800)
 
         report = {
             "url": url,
@@ -205,11 +214,17 @@ def to_config(report: Dict[str, Any], name: Optional[str] = None) -> Dict[str, A
 
     cases: List[Dict[str, Any]] = []
 
-    # 1. 冒烟：页面能打开、表格有数据、无报错
-    smoke = [{"assert_row_count": {"min": 1}}, {"assert_no_console_error": None}]
+    # 1. 冒烟：页面能打开、表格有数据、渲染正常、无报错
+    smoke = [{"assert_row_count": {"min": 1}},
+             {"assert_no_render_garbage": None},
+             {"assert_no_console_error": None}]
     if headers:
         smoke.insert(0, {"assert_headers": {"contains": headers[:5]}})
     cases.append({"name": "列表默认加载", "tags": ["smoke"], "steps": smoke})
+
+    # 1b. 工具栏按钮可用性巡检（任何页面都值得测）
+    cases.append({"name": "按钮可用性巡检", "tags": ["health"],
+                  "steps": [{"check_buttons": None}]})
 
     # 2. 每个文本框生成一条搜索用例
     #    取表格里已有的值做搜索词，保证一定能搜出结果
@@ -229,15 +244,15 @@ def to_config(report: Dict[str, Any], name: Optional[str] = None) -> Dict[str, A
             steps.append({"assert_row_count": {"min": 0}})
         cases.append({"name": f"搜索-{label}", "tags": ["search"], "steps": steps})
 
-    # 3. 下拉筛选
+    # 3. 下拉筛选：遍历每个选项逐一筛选，抓"某个选项筛选后报错"
     for f in fields:
         if f["type"] != "select" or not f.get("options"):
             continue
         label = f["label"]
         col = _match_column(label, headers)
-        steps = [{"select": {"label": label, "index": 0}}, {"search": None},
-                 {"assert_row_count": {"min": 0}}]
+        steps = [{"check_select_options": {"label": label}}]
         if col:
+            # 循环后 ${selected_label} 停在最后一个选项，据此校验列值
             steps.append({"assert_column_all": {"column": col,
                                                 "equals": "${selected_%s}" % label}})
         cases.append({"name": f"筛选-{label}", "tags": ["search"], "steps": steps})

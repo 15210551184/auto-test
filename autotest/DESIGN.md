@@ -64,7 +64,7 @@
 
 | 模块 | 行数 | 职责 |
 |---|---:|---|
-| `engine/actions.py` | 385 | 动作与断言注册表，26 个可用动作 |
+| `engine/actions.py` | 385 | 动作与断言注册表，29 个可用动作 |
 | `engine/scanner.py` | 341 | 打开页面识别结构，生成配置草稿 |
 | `server.py` | 295 | Web 控制台后端 |
 | `engine/login.py` | 291 | UI 自动登录、懒登录、验证码检测 |
@@ -474,9 +474,9 @@ reject bad yaml            → 400 YAML 语法错误
 
 ## 五、能力清单
 
-### 26 个可用动作
+### 29 个可用动作
 
-**动作类（14）**
+**动作类（16）**
 
 | 动作 | 用途 |
 |---|---|
@@ -487,6 +487,8 @@ reject bad yaml            → 400 YAML 语法错误
 | `click` | 点击（支持选择器别名或文本） |
 | `search` | 点搜索 + 等接口返回（复合动作） |
 | `wait` / `wait_api` | 等待时间 / 等待接口 |
+| `check_buttons` | 巡检工具栏按钮可用性（破坏性按钮只验存在） |
+| `check_select_options` | 遍历下拉每个选项逐一筛选、验不报错 |
 | `capture` | 抓当前表格快照存变量 |
 | `capture_all_pages` | 翻页抓全量 |
 | `fill_form` | 弹窗内批量填表 |
@@ -494,7 +496,7 @@ reject bad yaml            → 400 YAML 语法错误
 | `export_and_verify` | 导出 + 四层校验 |
 | `screenshot` | 手动截图 |
 
-**断言类（12）**
+**断言类（13）**
 
 | 断言 | 用途 |
 |---|---|
@@ -503,6 +505,7 @@ reject bad yaml            → 400 YAML 语法错误
 | `assert_column_all` | 某列所有值满足条件（equals/contains/matches） |
 | `assert_column_range` | 某列值在范围内（日期/数值） |
 | `assert_column_not_empty` | 空值率不超过阈值 |
+| `assert_no_render_garbage` | 无渲染异常（undefined/[object Object]/裸时间戳等） |
 | `assert_sorted` | 排序正确 |
 | `assert_inputs_empty` | 输入框已清空（重置用） |
 | `assert_api_matches_table` | 接口与表格渲染一致 |
