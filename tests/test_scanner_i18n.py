@@ -183,5 +183,81 @@ class ToConfigPropagatesVariantsTests(unittest.TestCase):
         self.assertNotIn("header_variants", cfg)
 
 
+class FakeMenuLocator:
+    """极简 locator 桩：click 记调用，all_inner_texts 按选择器返回预设文案。"""
+
+    def __init__(self, texts_by_sel, sel="", raise_on_click=False):
+        self._texts_by_sel = texts_by_sel
+        self._sel = sel
+        self._raise_on_click = raise_on_click
+
+    @property
+    def first(self):
+        return self
+
+    def click(self, timeout=None):
+        if self._raise_on_click:
+            raise TimeoutError("locator.click: Timeout exceeded")
+
+    def all_inner_texts(self):
+        return self._texts_by_sel.get(self._sel, [])
+
+
+class FakeMenuPage:
+    def __init__(self, texts_by_sel, raise_on_trigger_click=False):
+        self._texts_by_sel = texts_by_sel
+        self._raise_on_trigger_click = raise_on_trigger_click
+        self.keyboard = types.SimpleNamespace(press=lambda k: None)
+
+    def on(self, *a, **kw):
+        pass
+
+    def locator(self, sel):
+        raise_click = self._raise_on_trigger_click and sel == ".lang-switch"
+        return FakeMenuLocator(self._texts_by_sel, sel, raise_on_click=raise_click)
+
+    def wait_for_timeout(self, ms):
+        pass
+
+
+class ProbeLanguageOptionsTests(unittest.TestCase):
+    """
+    探测语言选项：点开切换控件，把弹出菜单里的文案读出来，省掉手动 F12
+    照抄的步骤——抄错一个字 switch_language 就永远匹配不上。
+    """
+
+    def test_reads_and_dedups_menu_texts(self):
+        menu_sel = (".el-dropdown-menu:visible .el-dropdown-menu__item, "
+                   ".el-dropdown-menu:visible li, "
+                   ".el-select-dropdown:visible .el-select-dropdown__item, "
+                   ".el-menu--popup:visible .el-menu-item, "
+                   ".el-popper:visible li, .el-popper:visible a")
+        page = FakeMenuPage({menu_sel: [" 中文 ", "English", "中文", ""]})
+        sc = PageScanner(page)
+        texts = sc.probe_language_options(".lang-switch")
+        self.assertEqual(["中文", "English"], texts)
+
+    def test_trigger_not_found_returns_empty(self):
+        page = FakeMenuPage({}, raise_on_trigger_click=True)
+        sc = PageScanner(page)
+        self.assertEqual([], sc.probe_language_options(".lang-switch"))
+
+    def test_no_matching_menu_structure_returns_empty(self):
+        page = FakeMenuPage({})   # 点开了，但没有任何选择器命中
+        sc = PageScanner(page)
+        self.assertEqual([], sc.probe_language_options(".lang-switch"))
+
+    def test_truncates_to_ten(self):
+        menu_sel = (".el-dropdown-menu:visible .el-dropdown-menu__item, "
+                   ".el-dropdown-menu:visible li, "
+                   ".el-select-dropdown:visible .el-select-dropdown__item, "
+                   ".el-menu--popup:visible .el-menu-item, "
+                   ".el-popper:visible li, .el-popper:visible a")
+        many = [f"L{i}" for i in range(15)]
+        page = FakeMenuPage({menu_sel: many})
+        sc = PageScanner(page)
+        self.assertEqual(10, len(sc.probe_language_options(".lang-switch")))
+
+
 if __name__ == "__main__":
     unittest.main()

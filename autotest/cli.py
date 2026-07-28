@@ -150,6 +150,29 @@ def cmd_run(a):
     sys.exit(1 if res.failed else 0)
 
 
+def cmd_probe_lang(a):
+    """打开项目首页、点语言切换控件，把菜单里的候选文案读出来，供手动
+    贴进项目设置的 languages.options——省掉 F12 一个个抄文案这一步。"""
+    proj = P.load_project(a.project)
+    if not proj:
+        print("项目不存在"); sys.exit(1)
+    home = proj.get("home_url")
+    if not home:
+        print("项目没有配置 home_url"); sys.exit(1)
+    print(f"探测语言选项：{home}  trigger={a.trigger}")
+    texts = scanner.probe_languages(home, a.trigger, storage_state=a.state, headless=True)
+    if not texts:
+        print("没探测到菜单项。可能是 trigger 选择器不对，或者点开之后的菜单结构"
+             "不是常见的 Element UI 下拉/菜单——退回手动 F12 看 DOM 自己填 options。")
+        return
+    print(f"\n探测到 {len(texts)} 个候选文案，把下面这段贴进「项目设置」的 languages：\n")
+    print("languages:")
+    print(f'  switcher_trigger: "{a.trigger}"')
+    print("  options:")
+    for t in texts:
+        print(f"    {t}: {t}")
+
+
 def cmd_auto(a):
     print(f"扫描 {a.url} ...")
     rep = scanner.scan(a.url, storage_state=a.state, headless=True)
@@ -211,6 +234,11 @@ def main():
                     help=f"并发跑几个页面，默认 {batch.DEFAULT_CONCURRENCY}；开太多 Chromium 标签页吃内存，服务器紧张就别调大")
     s8.add_argument("--lang", help="执行前先切到指定语言（project.yaml 里 languages.options 的 code）")
     s8.set_defaults(func=cmd_batch_run)
+
+    s9 = sub.add_parser("probe-lang", help="探测语言切换菜单里的候选文案")
+    s9.add_argument("project")
+    s9.add_argument("--trigger", required=True, help="语言切换控件的选择器（F12 找）")
+    s9.set_defaults(func=cmd_probe_lang)
 
     s5 = sub.add_parser("test-login", help="只验证账号密码能否登录")
     s5.add_argument("config")

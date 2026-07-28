@@ -421,6 +421,18 @@ def api_run():
         name = {"discover": f"扫描菜单 {d}", "batch-scan": f"生成用例 {d}",
                 "batch-run": f"批量执行 {d}"}[action]
 
+    elif action == "probe-lang":
+        d = body.get("project", "")
+        if not d or "/" in d or "\\" in d:
+            return jsonify({"ok": False, "msg": "项目参数不合法"}), 400
+        if not P.load_project(d):
+            return jsonify({"ok": False, "msg": "项目不存在"}), 404
+        trigger = (body.get("trigger") or "").strip()
+        if not trigger:
+            return jsonify({"ok": False, "msg": "请填语言切换控件的选择器"}), 400
+        cmd = [PY, "cli.py", "probe-lang", d, "--trigger", trigger]
+        name = f"探测语言选项 {d}"
+
     elif action == "scan":
         url = (body.get("url") or "").strip()
         if not re.match(r"^https?://", url):

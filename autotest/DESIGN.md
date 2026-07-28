@@ -639,6 +639,13 @@ languages:
 配了这个，扫描时会给每个页面自动补一条「多语言检查」用例，遍历
 `options` 里的每种语言各切一次、各查一次，不用逐页手写。
 
+`switcher_trigger` 只能手动 F12 找（没有统一 DOM 约定），但 `options`
+里每种语言在菜单里的精确文案可以自动读出来——控制台头部「探测语言选项」
+按钮，给了 `switcher_trigger` 之后打开首页点开菜单，把候选文案打印在
+运行日志里，照抄进 `project.yaml` 即可，不用再自己一个个抄、抄错一个字
+`switch_language` 就永远找不到那个菜单项（`scanner.probe_languages()` /
+`cli.py probe-lang`）。
+
 **项目设置怎么改**：`languages` 是项目级配置，加进已有项目不能靠重新
 扫描（扫描不会覆盖 login/languages 这类项目级字段）。控制台头部新增
 「项目设置」按钮，复用页面用例那套 YAML 编辑弹窗直接改 `project.yaml`——

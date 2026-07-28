@@ -484,6 +484,58 @@ class PageScanner:
 
         return label_variants, header_variants
 
+    def probe_language_options(self, switcher_trigger: str) -> List[str]:
+        """
+        点开语言切换控件，把弹出菜单里的候选文案读出来——省掉手动 F12 一个个
+        看菜单、照抄文案这一步（文案要一字不差，手抄容易錯）。
+
+        只覆盖 Element UI 常见的下拉/菜单结构，抓不到就返回空列表，不影响
+        手动填 languages.options 的老路径（这条本来就是可选的辅助功能）。
+        """
+        try:
+            self.page.locator(switcher_trigger).first.click(timeout=5000)
+            self.page.wait_for_timeout(400)
+        except Exception:
+            return []
+        sel = (".el-dropdown-menu:visible .el-dropdown-menu__item, "
+              ".el-dropdown-menu:visible li, "
+              ".el-select-dropdown:visible .el-select-dropdown__item, "
+              ".el-menu--popup:visible .el-menu-item, "
+              ".el-popper:visible li, .el-popper:visible a")
+        try:
+            texts = _unique([t.strip() for t in
+                            self.page.locator(sel).all_inner_texts() if t.strip()])
+        except Exception:
+            texts = []
+        try:
+            self.page.keyboard.press("Escape")
+        except Exception:
+            pass
+        return texts[:10]
+
+
+def probe_languages(url: str, switcher_trigger: str, storage_state: Optional[str] = None,
+                    headless: bool = True) -> List[str]:
+    """
+    打开页面、点语言切换控件，把弹出菜单里的候选文案读出来。给项目设置
+    「探测语言选项」用，省去手动 F12 一个个抄文案这一步；抄错一个字，
+    switch_language 就永远找不到那个菜单项，是个隐蔽但常见的坑。
+    """
+    with sync_playwright() as pw:
+        browser = B.launch(pw, headless=headless)
+        args = B.context_args()
+        state = valid_storage_state(storage_state)
+        if state:
+            args["storage_state"] = state
+        bctx = browser.new_context(**args)
+        page = bctx.new_page()
+        sc = PageScanner(page)
+        page.goto(url, wait_until="domcontentloaded", timeout=60000)
+        page.wait_for_timeout(2000)
+        texts = sc.probe_language_options(switcher_trigger)
+        browser.close()
+    return texts
+
 
 def _merge_positional(variants: Dict[str, Dict[str, str]], canonical: List[str],
                       translated: List[str], code: str) -> None:

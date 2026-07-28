@@ -185,6 +185,7 @@ a.open:hover{text-decoration:underline}
   <select id="projSel"></select>
   <button class="sm" id="btnNewProj">新建系统</button>
   <button class="sm" id="btnProjSettings">项目设置</button>
+  <button class="sm" id="btnProbeLang" title="打开首页、点开语言切换菜单，把候选文案读出来，省得手动 F12 抄">探测语言选项</button>
   <span id="globalState"><span class="dot"></span><span id="stateText">空闲</span></span>
   <a href="/logout" style="margin-left:8px;font-size:12px;color:var(--ink-3);text-decoration:none">退出登录</a>
 </header>
@@ -532,6 +533,16 @@ $('#btnProjSettings').onclick=async()=>{
   openYamlEditor({title:'项目设置 · '+proj.name,content:r.content,kind:'project',
     saveUrl:'/api/projects/'+encodeURIComponent(proj.dir)+'/settings'});
 };
+$('#btnProbeLang').onclick=async()=>{
+  if(!proj)return toast('请先选择或新建一个系统',true);
+  const cur=(proj.languages&&proj.languages.switcher_trigger)||'';
+  const trigger=prompt('语言切换控件的选择器（F12 找触发元素，比如 .lang-switch）：',cur);
+  if(!trigger)return;
+  const r=await post('/api/run',{action:'probe-lang',project:proj.dir,trigger:trigger});
+  if(!r.ok||!r.data.ok)return toast(r.data.msg||'启动失败',true);
+  term.innerHTML='';everStreamed=true;hideProgress();resetLogs();setBusy(true);
+  toast('探测结果稍后会打印在下面「运行日志」里，抄到「项目设置」的 languages 里即可');
+};
 
 function lineClass(s){
   if(s.indexOf('✓')>=0||/通过 \d/.test(s)) return 'l-pass';
@@ -694,7 +705,7 @@ $('#btnStop').onclick=async()=>{const r=await post('/api/stop');
   toast(r.data.ok?'已发送终止信号':'当前没有运行中的任务',!r.data.ok);};
 $('#btnClear').onclick=()=>{term.innerHTML='<span class="empty">日志已清空。</span>';everStreamed=false;hideProgress();resetLogs();};
 function setBusy(b){
-  ['#btnDiscover','#btnGen','#btnRegen','#btnRunSel','#btnNewProj'].forEach(s=>$(s).disabled=b);
+  ['#btnDiscover','#btnGen','#btnRegen','#btnRunSel','#btnNewProj','#btnProbeLang'].forEach(s=>$(s).disabled=b);
   $('#btnStop').disabled=!b;
   if(b) setState('busy','执行中');
 }
