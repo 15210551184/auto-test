@@ -182,6 +182,7 @@ a.open:hover{text-decoration:underline}
   <span class="sep">/</span>
   <select id="projSel"></select>
   <button class="sm" id="btnNewProj">新建系统</button>
+  <button class="sm" id="btnProjSettings">项目设置</button>
   <span id="globalState"><span class="dot"></span><span id="stateText">空闲</span></span>
   <a href="/logout" style="margin-left:8px;font-size:12px;color:var(--ink-3);text-decoration:none">退出登录</a>
 </header>
@@ -412,7 +413,7 @@ function renderTree(){
     btn.onclick=e=>{if(e.target.matches('input'))return;const g=btn.dataset.group;
       collapsedGroups.has(g)?collapsedGroups.delete(g):collapsedGroups.add(g);renderTree();};
   });
-  tree.querySelectorAll('[data-yaml]').forEach(btn=>{btn.onclick=async e=>{e.preventDefault();e.stopPropagation();const p=pages[+btn.dataset.yaml],r=await get('/api/projects/'+encodeURIComponent(proj.dir)+'/pages/'+encodeURIComponent(p.name)+'/config');if(!r.ok)return toast(r.msg||'读取 YAML 失败',true);$('#yamlTitle').textContent='编辑 YAML · '+p.name;$('#yamlText').value=r.content;$('#yamlMask').classList.add('show');$('#yamlMask').dataset.i=btn.dataset.yaml;};});
+  tree.querySelectorAll('[data-yaml]').forEach(btn=>{btn.onclick=async e=>{e.preventDefault();e.stopPropagation();const p=pages[+btn.dataset.yaml],r=await get('/api/projects/'+encodeURIComponent(proj.dir)+'/pages/'+encodeURIComponent(p.name)+'/config');if(!r.ok)return toast(r.msg||'读取 YAML 失败',true);openYamlEditor({title:'编辑 YAML · '+p.name,content:r.content,kind:'page',i:btn.dataset.yaml,saveUrl:'/api/projects/'+encodeURIComponent(proj.dir)+'/pages/'+encodeURIComponent(p.name)+'/config'});};});
   tree.querySelectorAll('[data-explain]').forEach(btn=>{btn.onclick=async e=>{
     e.preventDefault();e.stopPropagation();
     const p=pages[+btn.dataset.explain];
@@ -471,8 +472,39 @@ $('#btnDeleteSelected').onclick=async()=>{if(!proj)return;const selected=pages.f
   if(!r.ok||!r.data.ok)return toast(r.data.msg||'批量删除失败',true);
   pages=pages.filter(p=>!p.selected);renderTree();toast('已删除 '+r.data.deleted+' 个菜单及其用例');
 };
+function openYamlEditor(opts){
+  // 通用 YAML 编辑弹窗：页面用例、项目设置共用同一个弹窗，靠 kind/saveUrl
+  // 区分保存目标和保存后的收尾动作，不用维护两份几乎一样的弹窗
+  $('#yamlTitle').textContent=opts.title;
+  $('#yamlText').value=opts.content;
+  $('#yamlMask').classList.add('show');
+  $('#yamlMask').dataset.kind=opts.kind;
+  $('#yamlMask').dataset.saveUrl=opts.saveUrl;
+  $('#yamlMask').dataset.i=opts.i!=null?opts.i:'';
+}
 $('#yamlCancel').onclick=()=>$('#yamlMask').classList.remove('show');
-$('#yamlSave').onclick=async()=>{const i=+$('#yamlMask').dataset.i,p=pages[i];if(!p)return;const r=await post('/api/projects/'+encodeURIComponent(proj.dir)+'/pages/'+encodeURIComponent(p.name)+'/config',{content:$('#yamlText').value});if(!r.ok||!r.data.ok)return toast(r.data.msg||'保存失败',true);$('#yamlMask').classList.remove('show');p.has_config=true;renderTree();toast('YAML 已保存');};
+$('#yamlSave').onclick=async()=>{
+  const mask=$('#yamlMask'),url=mask.dataset.saveUrl;
+  if(!url)return;
+  const r=await post(url,{content:$('#yamlText').value});
+  if(!r.ok||!r.data.ok)return toast(r.data.msg||'保存失败',true);
+  mask.classList.remove('show');
+  if(mask.dataset.kind==='project'){
+    toast('项目设置已保存');
+  }else{
+    const p=pages[+mask.dataset.i];
+    if(p)p.has_config=true;
+    renderTree();
+    toast('YAML 已保存');
+  }
+};
+$('#btnProjSettings').onclick=async()=>{
+  if(!proj)return toast('请先选择或新建一个系统',true);
+  const r=await get('/api/projects/'+encodeURIComponent(proj.dir)+'/settings');
+  if(!r.ok)return toast(r.msg||'读取项目设置失败',true);
+  openYamlEditor({title:'项目设置 · '+proj.name,content:r.content,kind:'project',
+    saveUrl:'/api/projects/'+encodeURIComponent(proj.dir)+'/settings'});
+};
 
 function lineClass(s){
   if(s.indexOf('✓')>=0||/通过 \d/.test(s)) return 'l-pass';

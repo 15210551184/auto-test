@@ -236,5 +236,46 @@ class CrudConfigGenerationTests(unittest.TestCase):
         self.assertEqual([], crud_cases)
 
 
+class MultiLanguageConfigTests(unittest.TestCase):
+    """languages 配了 switcher_trigger/options 才生成多语言检查用例，零配置不生成。"""
+
+    def setUp(self):
+        self.report = {
+            "url": "http://x.test/web/country",
+            "title": "国家管理",
+            "form_fields": [],
+            "table": {"headers": ["国家名称"], "row_count": 3,
+                      "column_types": {}, "sample_row": {}},
+            "buttons": {},
+            "pagination": {},
+            "list_api": None,
+        }
+
+    def test_no_languages_config_generates_nothing(self):
+        cfg = scanner.to_config(self.report)
+        names = [c["name"] for c in cfg["cases"]]
+        self.assertNotIn("多语言检查", names)
+        self.assertNotIn("languages", cfg)
+
+    def test_languages_config_generates_switch_and_check_per_language(self):
+        languages = {"switcher_trigger": ".lang-switch",
+                     "options": {"zh": "中文", "en": "English"}}
+        cfg = scanner.to_config(self.report, languages=languages)
+        case = next(c for c in cfg["cases"] if c["name"] == "多语言检查")
+        self.assertEqual(["i18n"], case["tags"])
+        actions = [a for s in case["steps"] for a in s.keys()]
+        # 每种语言一轮：切换 -> 搜索 -> 两个检查
+        self.assertEqual(actions.count("switch_language"), 2)
+        self.assertEqual(actions.count("assert_no_i18n_leak"), 2)
+        self.assertEqual(actions.count("assert_no_mixed_language"), 2)
+        self.assertEqual(languages, cfg["languages"])
+
+    def test_incomplete_languages_config_is_ignored(self):
+        # 只配了 trigger 没配 options（反之亦然）——信息不全，宁可不生成
+        cfg = scanner.to_config(self.report, languages={"switcher_trigger": ".lang"})
+        names = [c["name"] for c in cfg["cases"]]
+        self.assertNotIn("多语言检查", names)
+
+
 if __name__ == "__main__":
     unittest.main()

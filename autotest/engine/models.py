@@ -51,6 +51,7 @@ class PageConfig:
     export_mode: str = "auto"               # direct | async | auto
     export_task_api: Optional[str] = None
     login: Dict[str, Any] = field(default_factory=dict)   # UI 自动登录配置
+    languages: Dict[str, Any] = field(default_factory=dict)   # 语言切换控件配置
 
 
 @dataclass

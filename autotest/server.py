@@ -593,6 +593,34 @@ def api_save_page_config(d, page):
     return jsonify({"ok": True})
 
 
+@app.get("/api/projects/<d>/settings")
+def api_get_project_settings(d):
+    """项目本身的原始 YAML（登录信息、多语言配置等）。目前只有页面配置有
+    可视化表单，项目级设置（比如新增之后要补的 languages）只能靠这个
+    编辑，跟页面配置的「编辑 YAML」是同一套模式。"""
+    path = P.project_yaml_path(d)
+    if not path.is_file():
+        return jsonify({"ok": False, "msg": "项目不存在"}), 404
+    return jsonify({"ok": True, "content": path.read_text(encoding="utf-8")})
+
+
+@app.post("/api/projects/<d>/settings")
+def api_save_project_settings(d):
+    path = P.project_yaml_path(d)
+    if not path.is_file():
+        return jsonify({"ok": False, "msg": "项目不存在"}), 404
+    content = (request.get_json(force=True) or {}).get("content", "")
+    try:
+        import yaml
+        data = yaml.safe_load(content)
+    except Exception as exc:
+        return jsonify({"ok": False, "msg": f"YAML 语法错误: {exc}"}), 400
+    if not isinstance(data, dict) or not data.get("name") or not data.get("home_url"):
+        return jsonify({"ok": False, "msg": "至少要保留 name 和 home_url 两个字段"}), 400
+    path.write_text(content, encoding="utf-8")
+    return jsonify({"ok": True})
+
+
 @app.get("/reports/<path:sub>")
 def serve_report(sub):
     return send_from_directory(REPORT_DIR, sub)

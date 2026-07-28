@@ -134,6 +134,7 @@ def load_config(path: str) -> PageConfig:
         export_mode=raw.get("export_mode", "auto"),
         export_task_api=raw.get("export_task_api"),
         login=raw.get("login", {}),
+        languages=raw.get("languages", {}),
     )
 
 

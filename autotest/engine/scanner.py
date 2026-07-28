@@ -387,7 +387,8 @@ def scan(url: str, storage_state: Optional[str] = None,
 
 # ---------- 生成配置 ----------
 
-def to_config(report: Dict[str, Any], name: Optional[str] = None) -> Dict[str, Any]:
+def to_config(report: Dict[str, Any], name: Optional[str] = None,
+             languages: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     fields = report["form_fields"]
     table = report.get("table") or {}
     headers = _unique(table.get("headers", []))
@@ -553,6 +554,17 @@ def to_config(report: Dict[str, Any], name: Optional[str] = None) -> Dict[str, A
             {"assert_in_list": {"column": "列名", "value": "${form_字段名}"}},
         ]})
 
+    # 多语言检查：项目配了 languages.switcher_trigger/options 才生成，
+    # 零配置生成不出来——语言切换控件没有统一 DOM 约定，猜不出来
+    if languages and languages.get("switcher_trigger") and languages.get("options"):
+        i18n_steps = []
+        for code in languages["options"]:
+            i18n_steps.append({"switch_language": {"to": code}})
+            i18n_steps.append({"search": None})
+            i18n_steps.append({"assert_no_i18n_leak": None})
+            i18n_steps.append({"assert_no_mixed_language": {"expect": code}})
+        cases.append({"name": "多语言检查", "tags": ["i18n"], "steps": i18n_steps})
+
     cfg: Dict[str, Any] = {
         "name": name or report.get("title") or "自动生成",
         "url": report["url"],
@@ -561,6 +573,8 @@ def to_config(report: Dict[str, Any], name: Optional[str] = None) -> Dict[str, A
         cfg["list_api"] = report["list_api"]
     if btns.get("export"):
         cfg["export_mode"] = "auto"
+    if languages:
+        cfg["languages"] = languages
     cfg["cases"] = cases
     return cfg
 

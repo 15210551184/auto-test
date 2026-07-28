@@ -115,8 +115,8 @@ def scan_selected(dir_name: str, storage_state: Optional[str] = None,
         try:
             _log(on_log, f"  [{i}/{len(pages)}] {name} — 扫描中…")
             rep = _scan_with_timeout(url, storage_state)
-            cfg = scanner.to_config(rep, name=name)
-            cfg = P.inject_login(cfg, proj)
+            cfg = scanner.to_config(rep, name=name, languages=proj.get("languages"))
+            cfg = P.inject_project_settings(cfg, proj)
             dest.parent.mkdir(parents=True, exist_ok=True)
             dest.write_text(
                 yaml.dump(cfg, allow_unicode=True, sort_keys=False, width=110),

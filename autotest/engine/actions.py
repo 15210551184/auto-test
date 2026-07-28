@@ -264,6 +264,106 @@ def as_no_render_garbage(ctx, columns: list = None, extra: list = None, **kw):
     return f"渲染检查通过（{len(data)} 行 × {len(cols)} 列）✓"
 
 
+# ============ 多语言 ============
+
+@action("switch_language")
+def do_switch_language(ctx, to: str = None, **kw):
+    """
+    切换页面语言。
+
+    语言切换控件（图标/下拉/独立按钮）不像表单、表格那样有统一的 DOM 约定，
+    没法像其他动作一样零配置自动识别，需要在项目配置里指定一次：
+        languages:
+          switcher_trigger: ".lang-switch"   # F12 找触发元素的选择器
+          options: {zh: 中文, en: English}    # 每种语言在切换菜单里显示的文字
+    切完记下 ctx.vars['_current_lang']，供 assert_no_mixed_language 默认取用。
+    """
+    langs = ctx.config.languages
+    if not langs or not langs.get("switcher_trigger") or not langs.get("options"):
+        raise LookupError(
+            "配置里没有 languages.switcher_trigger / languages.options，无法切换语言。"
+            "请在项目配置里补上（F12 找语言切换按钮的选择器）"
+        )
+    options = langs["options"]
+    if to not in options:
+        raise LookupError(f"未知语言 '{to}'，配置里只有: {list(options)}")
+
+    page = ctx.page
+    target_text = options[to]
+    page.locator(langs["switcher_trigger"]).first.click(timeout=5000)
+    page.wait_for_timeout(300)
+    page.get_by_text(target_text, exact=True).first.click(timeout=5000)
+    page.wait_for_timeout(1000)
+    ctx.vars["_current_lang"] = to
+    return f"已切换到 {target_text}"
+
+
+# 形如 common.search / menu.order.list —— i18n 库找不到翻译时常见的 fallback
+# 行为就是直接把 key 原样显示出来，肉眼很容易当成正常文案扫过去
+_I18N_KEY_RE = re.compile(r"^[a-zA-Z][\w]*(\.[a-zA-Z][\w]*){1,}$")
+# 没被替换掉的模板占位符，比如 {{ common.search }} 或 ${title}
+_I18N_TEMPLATE_RE = re.compile(r"\{\{.*?\}\}|\$\{[^}]*\}")
+_CJK_RE = re.compile(r"[一-鿿]")
+
+
+@action("assert_no_i18n_leak")
+def as_no_i18n_leak(ctx, columns: list = None, **kw):
+    """
+    检查表格里有没有漏翻译的原始 key（如 'common.search'）或没渲染掉的模板
+    占位符（如 '{{xxx}}'）——翻译文件漏配某个 key 时，前端常见的失败模式
+    是直接显示 key 本身而不是报错，人工核对很容易漏看。
+    """
+    data = ctx.ui.table_data(ctx.page)
+    if not data:
+        return "列表为空，跳过翻译泄漏检查"
+    cols = columns or list(data[0].keys())
+    bad = []
+    for i, row in enumerate(data):
+        for c in cols:
+            if c not in row:
+                continue
+            s = N.text(row[c])
+            if not s:
+                continue
+            if _I18N_KEY_RE.match(s) or _I18N_TEMPLATE_RE.search(s):
+                bad.append(f"行{i+1} {c}='{s}'")
+    if bad:
+        _fail(f"发现 {len(bad)} 处疑似漏翻译: {bad[:5]}")
+    return "翻译泄漏检查通过 ✓"
+
+
+@action("assert_no_mixed_language")
+def as_no_mixed_language(ctx, expect: str = None, columns: list = None, **kw):
+    """
+    切到某语言后，页面不该还残留中文——这是最常见的漏翻译表现：某个字段
+    没配对应语言的翻译，UI 就直接落回默认的中文文案。
+
+    只检查"非中文语言下不该有中文"这一个方向，不反过来查"中文页面不该有
+    英文"——中文界面里出现英文缩写、品牌名、ID 之类完全正常，反向检查
+    误报会很多。expect 不传就用 switch_language 记下的当前语言。
+    """
+    lang = expect or ctx.vars.get("_current_lang")
+    if not lang:
+        raise LookupError("不知道当前应该是什么语言：传 expect 参数，或者先执行 switch_language")
+    if lang == "zh":
+        return "当前语言是中文，跳过混用检查"
+    data = ctx.ui.table_data(ctx.page)
+    if not data:
+        return "列表为空，跳过多语言检查"
+    cols = columns or list(data[0].keys())
+    bad = []
+    for i, row in enumerate(data):
+        for c in cols:
+            if c not in row:
+                continue
+            s = N.text(row[c])
+            if s and _CJK_RE.search(s):
+                bad.append(f"行{i+1} {c}='{s}'")
+    if bad:
+        _fail(f"应为 '{lang}' 但发现 {len(bad)} 处残留中文: {bad[:5]}")
+    return f"多语言检查通过（{lang}）✓"
+
+
 @action("check_select_options")
 def do_check_select_options(ctx, label: str = None, max_options: int = 6, **kw):
     """

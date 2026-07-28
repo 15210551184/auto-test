@@ -59,7 +59,7 @@ def list_projects() -> List[Dict]:
 
 
 def load_project(dir_name: str) -> Optional[Dict]:
-    f = PROJECTS_DIR / _safe(dir_name) / "project.yaml"
+    f = project_yaml_path(dir_name)
     if not f.exists():
         return None
     data = yaml.safe_load(f.read_text(encoding="utf-8")) or {}
@@ -134,6 +134,10 @@ def page_config_path(dir_name: str, page_name: str) -> Path:
     return PROJECTS_DIR / _safe(dir_name) / "pages" / f"{_safe(page_name)}.yaml"
 
 
+def project_yaml_path(dir_name: str) -> Path:
+    return PROJECTS_DIR / _safe(dir_name) / "project.yaml"
+
+
 def remove_page(dir_name: str, page_name: str) -> bool:
     """从菜单地图移除一个页面，并删除它已生成的用例配置。"""
     data = load_project(dir_name)
@@ -179,11 +183,13 @@ def selected_pages(dir_name: str) -> List[Dict]:
     return [p for p in data.get("pages", []) if p.get("selected")]
 
 
-def inject_login(cfg: Dict, project: Dict) -> Dict:
+def inject_project_settings(cfg: Dict, project: Dict) -> Dict:
     """
-    把项目级的登录信息注入到页面配置里。
-    页面配置自己写了 login 就不覆盖，允许个别页面用不同账号。
+    把项目级设置（登录信息、多语言切换配置）注入到页面配置里。
+    页面配置自己写了同名字段就不覆盖，允许个别页面用不同账号/语言配置。
     """
     if "login" not in cfg and project.get("login"):
         cfg["login"] = dict(project["login"])
+    if "languages" not in cfg and project.get("languages"):
+        cfg["languages"] = dict(project["languages"])
     return cfg

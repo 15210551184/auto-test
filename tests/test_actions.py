@@ -16,8 +16,9 @@ if "playwright.sync_api" not in sys.modules:
 
 from autotest.engine.actions import (AssertionFailed, AssertionWarning,
                                      as_no_console, as_no_failed_req,
+                                     as_no_i18n_leak, as_no_mixed_language,
                                      as_no_render_garbage, as_row_count,
-                                     do_check_select_options)
+                                     do_check_select_options, do_switch_language)
 
 
 class FakeUI:
@@ -32,6 +33,7 @@ class FakeCtx:
     def __init__(self, rows):
         self.ui = FakeUI(rows)
         self.page = None
+        self.vars = {}
 
 
 class RenderGarbageTests(unittest.TestCase):
@@ -200,6 +202,101 @@ class SeverityDowngradeTests(unittest.TestCase):
         with self.assertRaises(AssertionFailed) as cm:
             as_row_count(ctx, min=1)
         self.assertNotIn("可能相关", str(cm.exception))
+
+
+class FakeLangPage:
+    def __init__(self):
+        self.calls = []
+
+    def locator(self, sel):
+        self.calls.append(("locator", sel))
+        return self
+
+    @property
+    def first(self):
+        return self
+
+    def click(self, timeout=None):
+        self.calls.append("click")
+
+    def wait_for_timeout(self, ms):
+        pass
+
+    def get_by_text(self, text, exact=False):
+        self.calls.append(("get_by_text", text))
+        return self
+
+
+class FakeLangCtx:
+    def __init__(self, languages):
+        self.page = FakeLangPage()
+        self.config = types.SimpleNamespace(languages=languages)
+        self.vars = {}
+
+
+class SwitchLanguageTests(unittest.TestCase):
+    def test_missing_config_raises_lookup_error(self):
+        ctx = FakeLangCtx({})
+        with self.assertRaises(LookupError):
+            do_switch_language(ctx, to="en")
+
+    def test_unknown_language_raises_lookup_error(self):
+        ctx = FakeLangCtx({"switcher_trigger": ".lang-switch", "options": {"zh": "中文"}})
+        with self.assertRaises(LookupError):
+            do_switch_language(ctx, to="fr")
+
+    def test_successful_switch_records_current_lang(self):
+        ctx = FakeLangCtx({"switcher_trigger": ".lang-switch",
+                           "options": {"zh": "中文", "en": "English"}})
+        msg = do_switch_language(ctx, to="en")
+        self.assertEqual("en", ctx.vars["_current_lang"])
+        self.assertIn("English", msg)
+        self.assertIn(("get_by_text", "English"), ctx.page.calls)
+
+
+class I18nLeakTests(unittest.TestCase):
+    def test_dotted_key_leak_detected(self):
+        ctx = FakeCtx([{"名称": "common.search"}])
+        with self.assertRaises(AssertionFailed):
+            as_no_i18n_leak(ctx)
+
+    def test_template_placeholder_leak_detected(self):
+        ctx = FakeCtx([{"名称": "{{ menu.title }}"}])
+        with self.assertRaises(AssertionFailed):
+            as_no_i18n_leak(ctx)
+
+    def test_normal_text_passes(self):
+        ctx = FakeCtx([{"名称": "加纳"}, {"名称": "Ghana"}])
+        self.assertIn("通过", as_no_i18n_leak(ctx))
+
+    def test_empty_table_skipped(self):
+        self.assertIn("跳过", as_no_i18n_leak(FakeCtx([])))
+
+
+class MixedLanguageTests(unittest.TestCase):
+    def test_chinese_residue_flagged_when_expecting_english(self):
+        ctx = FakeCtx([{"国家名称": "加纳"}])
+        with self.assertRaises(AssertionFailed):
+            as_no_mixed_language(ctx, expect="en")
+
+    def test_english_only_passes(self):
+        ctx = FakeCtx([{"国家名称": "Ghana"}])
+        self.assertIn("通过", as_no_mixed_language(ctx, expect="en"))
+
+    def test_zh_expectation_always_skips(self):
+        ctx = FakeCtx([{"国家名称": "加纳"}])
+        self.assertIn("跳过", as_no_mixed_language(ctx, expect="zh"))
+
+    def test_uses_current_lang_var_when_expect_not_passed(self):
+        ctx = FakeCtx([{"国家名称": "加纳"}])
+        ctx.vars["_current_lang"] = "en"
+        with self.assertRaises(AssertionFailed):
+            as_no_mixed_language(ctx)
+
+    def test_no_lang_known_raises_lookup_error(self):
+        ctx = FakeCtx([{"国家名称": "Ghana"}])
+        with self.assertRaises(LookupError):
+            as_no_mixed_language(ctx)
 
 
 if __name__ == "__main__":

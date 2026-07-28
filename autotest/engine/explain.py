@@ -315,6 +315,34 @@ def _(p):
     return f"点这条记录的状态切换按钮（如「设为失效」），检查「{col}」列确实变了"
 
 
+# ============ 多语言 ============
+
+_LANG_NAMES = {"zh": "中文", "en": "英文", "ja": "日文", "ko": "韩文",
+              "fr": "法文", "de": "德文", "es": "西班牙文", "ru": "俄文"}
+
+
+def _lang_name(code):
+    return _LANG_NAMES.get(code, code)
+
+
+@_tpl("switch_language")
+def _(p):
+    return f"把页面语言切换成{_lang_name(_p(p, 'to', '?'))}"
+
+
+@_tpl("assert_no_i18n_leak")
+def _(p):
+    return "检查列表里没有漏翻译露出来的原始 key（如 common.search）或没渲染掉的模板占位符（如 {{xxx}}）"
+
+
+@_tpl("assert_no_mixed_language")
+def _(p):
+    lang = _p(p, "expect")
+    if lang:
+        return f"检查切到{_lang_name(lang)}之后，列表里没有残留中文（漏翻译最常见的表现）"
+    return "检查当前语言下列表里没有残留中文（漏翻译最常见的表现）"
+
+
 def explain_step(step: Step) -> str:
     fn = _ACTIONS.get(step.action)
     if fn:
