@@ -375,6 +375,9 @@ function renderTree(){
       else tags.push('<span class="tag no">无表格</span>');
       if(p.has_export) tags.push('<span class="tag">可导出</span>');
       if(p.has_create) tags.push('<span class="tag">可新增</span>');
+      if(p.has_edit) tags.push('<span class="tag">可编辑</span>');
+      if(p.has_delete) tags.push('<span class="tag">可删除</span>');
+      if(p.has_batch) tags.push('<span class="tag">批量操作</span>');
       if(p.recommended) tags.push('<span class="tag rec">推荐</span>');
       h+='<label class="item lvl'+depth+' '+(p.selected?'':'off')+'" style="padding-left:'+(15+depth*16+18)+'px">'+
          '<input type="checkbox" data-i="'+i+'" '+(p.selected?'checked':'')+'>'+

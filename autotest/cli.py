@@ -111,6 +111,9 @@ def cmd_menu(a):
         if pg.get("columns"): extra.append(f"{pg['columns']}列")
         if pg.get("has_export"): extra.append("可导出")
         if pg.get("has_create"): extra.append("可新增")
+        if pg.get("has_edit"): extra.append("可编辑")
+        if pg.get("has_delete"): extra.append("可删除")
+        if pg.get("has_batch"): extra.append("批量操作")
         tail = f"  [{', '.join(extra)}]" if extra else ""
         grp = f"{pg['group']} / " if pg.get("group") else ""
         print(f"  {mark} {grp}{pg['name']}{tail}")

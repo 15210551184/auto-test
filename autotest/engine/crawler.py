@@ -424,6 +424,9 @@ def _probe_page(page: Page) -> Dict:
         "has_search": has_btn("搜索", "查询"),
         "has_export": has_btn("导出", "下载"),
         "has_create": has_btn("新增", "添加", "创建"),
+        "has_edit": has_btn("编辑", "修改"),
+        "has_delete": has_btn("删除"),
+        "has_batch": has_btn("批量"),
         # 有表格 + 有搜索 = 典型的数据列表页，最值得测
         "recommended": bool(has_table and cols >= 2),
     }
