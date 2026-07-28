@@ -160,11 +160,17 @@ def cmd_probe_lang(a):
     if not home:
         print("项目没有配置 home_url"); sys.exit(1)
     print(f"探测语言选项：{home}  trigger={a.trigger}")
-    texts = scanner.probe_languages(home, a.trigger, storage_state=a.state, headless=True)
+    try:
+        texts = scanner.probe_languages(home, a.trigger, storage_state=a.state, headless=True)
+    except LookupError as e:
+        print(f"✗ {e}")
+        print("选择器写错了或者页面上根本没有这个元素——F12 打开开发者工具，用左上角的"
+             "选中箭头点一下语言切换按钮，看 Elements 面板里它的 class/id 到底是什么。")
+        return
     if not texts:
-        print("没探测到菜单项。可能是 trigger 选择器不对（点了没反应/点错了元素），"
-             "或者点开之后没有新文字出现在页面上（比如切换用的是图标/国旗图片，"
-             "没有可见文字）——退回手动 F12 看 DOM 自己填 options。")
+        print("点开了，但页面上没有新文字出现。可能这个切换控件本身没有可见文字"
+             "（用的是图标/国旗图片），探测不出来——退回手动 F12 看菜单里的中文文案，"
+             "自己填 options。")
         return
     print(f"\n探测到 {len(texts)} 个候选文案，把下面这段贴进「项目设置」的 languages：\n")
     print("languages:")

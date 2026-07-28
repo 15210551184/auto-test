@@ -510,8 +510,12 @@ class PageScanner:
         看菜单、照抄文案这一步（文案要一字不差，手抄容易错）。
 
         点击前后各拍一次"当前可见的短文本"快照，取差集当作候选项——不猜
-        具体是哪个框架、哪套 class 命名，点开之后新冒出来的字就是候选，
-        抓不到就返回空列表，不影响手动填 languages.options 的老路径。
+        具体是哪个框架、哪套 class 命名，点开之后新冒出来的字就是候选。
+
+        选择器本身点不到元素（超时）会抛 LookupError——跟"点开了但没有
+        新文案出现"（返回空列表）是两种不同的失败，前者是选择器写错了，
+        后者更可能是切换控件本身没有可见文字（图标/国旗图片）；分开报错
+        才不会两种情况都甩一句"没探测到"让人无从下手。
         """
         try:
             before = set(self.page.evaluate(self._VISIBLE_LEAF_TEXTS_JS))
@@ -519,9 +523,11 @@ class PageScanner:
             before = set()
         try:
             self.page.locator(switcher_trigger).first.click(timeout=5000)
-            self.page.wait_for_timeout(500)
-        except Exception:
-            return []
+        except Exception as e:
+            raise LookupError(
+                f"选择器 '{switcher_trigger}' 点不到任何元素（等了 5s）：{type(e).__name__}"
+            ) from e
+        self.page.wait_for_timeout(500)
         try:
             after = self.page.evaluate(self._VISIBLE_LEAF_TEXTS_JS)
         except Exception:

@@ -237,10 +237,13 @@ class ProbeLanguageOptionsTests(unittest.TestCase):
         texts = sc.probe_language_options(".lang-switch")
         self.assertEqual(["中文", "English"], texts)
 
-    def test_trigger_click_failure_returns_empty(self):
+    def test_trigger_click_failure_raises_lookup_error(self):
+        # 选择器写错、点不到任何元素——跟"点开了但没冒出新文字"是两种不同的
+        # 失败原因，前者得报出来让人去改选择器，不能也悄悄返回空列表。
         page = FakeMenuPage([[]], raise_on_trigger_click=True)
         sc = PageScanner(page)
-        self.assertEqual([], sc.probe_language_options(".lang-switch"))
+        with self.assertRaises(LookupError):
+            sc.probe_language_options(".lang-switch")
 
     def test_nothing_new_appeared_returns_empty(self):
         same = ["搜索", "重置"]
