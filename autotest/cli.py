@@ -162,8 +162,9 @@ def cmd_probe_lang(a):
     print(f"探测语言选项：{home}  trigger={a.trigger}")
     texts = scanner.probe_languages(home, a.trigger, storage_state=a.state, headless=True)
     if not texts:
-        print("没探测到菜单项。可能是 trigger 选择器不对，或者点开之后的菜单结构"
-             "不是常见的 Element UI 下拉/菜单——退回手动 F12 看 DOM 自己填 options。")
+        print("没探测到菜单项。可能是 trigger 选择器不对（点了没反应/点错了元素），"
+             "或者点开之后没有新文字出现在页面上（比如切换用的是图标/国旗图片，"
+             "没有可见文字）——退回手动 F12 看 DOM 自己填 options。")
         return
     print(f"\n探测到 {len(texts)} 个候选文案，把下面这段贴进「项目设置」的 languages：\n")
     print("languages:")

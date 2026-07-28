@@ -31,10 +31,26 @@ header .sep{color:var(--line)}
 .wrap{max-width:1400px;margin:0 auto;padding:18px 20px 40px;
   display:grid;grid-template-columns:1fr 400px;gap:18px;align-items:start}
 @media(max-width:1000px){.wrap{grid-template-columns:1fr}}
+/* 宽屏下把左列（菜单树 + 运行日志）锁进一屏高度，两张卡各自内部滚动——
+   之前是页面整体往下滚才能看到运行日志，跑测试时经常要边看日志边勾
+   菜单，来回滚动很烦。窄屏（<=1000px，含手机）维持原来的整页滚动，
+   触屏上"锁高度+内部滚动"体验反而更别扭。 */
+@media(min-width:1001px){
+  .wrap{height:calc(100vh - 52px)}
+  .col-left,.col-right{display:flex;flex-direction:column;gap:16px;min-height:0;height:100%}
+  .col-left>.card,.col-right>.card{margin-bottom:0;min-height:0}
+  .col-left>.card:not(.term-card){flex:1 1 42%;display:flex;flex-direction:column}
+  .col-left>.card:not(.term-card) .tree{flex:1;max-height:none}
+  .col-left>.card.term-card{flex:1 1 58%;display:flex;flex-direction:column}
+  .term-card .term{flex:1;height:auto;min-height:0}
+  .col-right>.card:first-child{flex:0 0 auto}
+  .col-right>.card:last-child{flex:1;display:flex;flex-direction:column}
+  .col-right>.card:last-child #repWrap{flex:1;overflow-y:auto;min-height:0}
+}
 .card{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);margin-bottom:16px}
 .card>h2{margin:0;padding:11px 15px;font-size:12px;font-weight:600;letter-spacing:.09em;
   text-transform:uppercase;color:var(--ink-3);border-bottom:1px solid var(--line);
-  display:flex;align-items:center;gap:8px}
+  flex:0 0 auto;display:flex;align-items:center;gap:8px}
 .card>h2 .count{margin-left:auto;font-size:11px;letter-spacing:0;text-transform:none;
   color:var(--ink-3);font-weight:400}
 .card .body{padding:13px 15px}
@@ -107,7 +123,7 @@ details.exec-opts[open]>summary{border-bottom:1px solid var(--line)}
 .tag.rec{background:#e6f6ef;color:var(--pass)}
 .tag.no{background:#f6f7f9;color:var(--ink-3)}
 .tag.cfg{background:#e8f0fe;color:var(--busy)}
-.selbar{display:flex;align-items:center;gap:10px;padding:9px 15px;
+.selbar{display:flex;align-items:center;gap:10px;padding:9px 15px;flex:0 0 auto;
   border-bottom:1px solid var(--line);background:#fafbfc;font-size:12.5px;color:var(--ink-2)}
 .selbar .right{margin-left:auto;display:flex;gap:4px}
 .term-card{background:var(--term-bg);border-color:#252c36}
@@ -115,7 +131,7 @@ details.exec-opts[open]>summary{border-bottom:1px solid var(--line)}
 .term-head{display:flex;align-items:center;gap:10px;width:100%}
 .term-head .job{color:#c8d2df;font-size:12px;letter-spacing:0;text-transform:none;font-weight:400}
 .term-head .elapsed{margin-left:auto;color:#5e6a7a;font-size:11px;letter-spacing:0;text-transform:none}
-.term-prog{padding:10px 15px;border-bottom:1px solid #252c36;background:var(--term-bg)}
+.term-prog{padding:10px 15px;border-bottom:1px solid #252c36;background:var(--term-bg);flex:0 0 auto}
 .tp-text{display:flex;justify-content:space-between;gap:12px;font-size:12px;
   color:#9aa6b5;margin-bottom:6px}
 .tp-text #tpCount{color:#7fb0ff;white-space:nowrap}
@@ -125,7 +141,7 @@ details.exec-opts[open]>summary{border-bottom:1px solid var(--line)}
 .tp-bar.indet i{width:35%!important;transition:none;
   animation:indet 1.1s ease-in-out infinite}
 @keyframes indet{0%{margin-left:-35%}100%{margin-left:100%}}
-.term-tabs{display:flex;gap:6px;padding:8px 15px;overflow-x:auto;
+.term-tabs{display:flex;gap:6px;padding:8px 15px;overflow-x:auto;flex:0 0 auto;
   border-bottom:1px solid #252c36;background:#171c24}
 .term-tabs::-webkit-scrollbar{height:5px}
 .term-tab{flex:0 0 auto;font-size:11.5px;padding:4px 10px;border-radius:12px;
@@ -146,7 +162,7 @@ details.exec-opts[open]>summary{border-bottom:1px solid var(--line)}
 .term .empty{color:#5e6a7a;font-style:italic}
 .term-foot{border-top:1px solid #252c36;padding:9px 15px;display:flex;align-items:center;
   gap:10px;font-size:12px;color:#7d8899;position:sticky;bottom:0;background:var(--term-bg);
-  box-shadow:0 -8px 12px -8px rgba(0,0,0,.4)}
+  box-shadow:0 -8px 12px -8px rgba(0,0,0,.4);flex:0 0 auto}
 .term-foot label{margin:0;color:#7d8899;display:flex;align-items:center;gap:5px;font-size:12px}
 .term-foot .right{margin-left:auto;display:flex;gap:8px}
 .term-foot button{background:transparent;border-color:#333c48;color:#9aa6b5;padding:5px 10px;font-size:12px}
@@ -204,7 +220,7 @@ a.open:hover{text-decoration:underline}
   <a href="/logout" style="margin-left:8px;font-size:12px;color:var(--ink-3);text-decoration:none">退出登录</a>
 </header>
 <div class="wrap">
-  <div>
+  <div class="col-left">
     <div class="card">
       <h2>测试哪些菜单 <span class="count" id="pageCount"></span>
         <button class="link sm" type="button" id="btnFoldAll" style="margin-left:auto">全部收起</button></h2>
@@ -241,7 +257,7 @@ a.open:hover{text-decoration:underline}
       </div>
     </div>
   </div>
-  <div>
+  <div class="col-right">
     <div class="card">
       <h2>操作</h2>
       <div class="body">

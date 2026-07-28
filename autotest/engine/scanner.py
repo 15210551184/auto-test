@@ -484,34 +484,59 @@ class PageScanner:
 
         return label_variants, header_variants
 
+    # 点一下语言切换控件之后，页面上"新冒出来的短文本"抓出来，用前后两次
+    # 快照做差集——不依赖任何具体框架的 DOM 结构（Element UI 的下拉、纯手写
+    # 的 ul、隐藏 div 切 display 都一样能抓到），比按框架猜选择器稳得多。
+    _VISIBLE_LEAF_TEXTS_JS = """
+        () => {
+          const out = [];
+          document.querySelectorAll('body *').forEach(el => {
+            if (el.children.length > 0) return;   // 只要叶子节点，避免大容器把一整段文本当成一项
+            const text = (el.textContent || '').trim();
+            if (!text || text.length > 24) return;
+            const rect = el.getBoundingClientRect();
+            if (rect.width === 0 || rect.height === 0) return;
+            const style = getComputedStyle(el);
+            if (style.visibility === 'hidden' || style.display === 'none') return;
+            out.push(text);
+          });
+          return out;
+        }
+    """
+
     def probe_language_options(self, switcher_trigger: str) -> List[str]:
         """
         点开语言切换控件，把弹出菜单里的候选文案读出来——省掉手动 F12 一个个
-        看菜单、照抄文案这一步（文案要一字不差，手抄容易錯）。
+        看菜单、照抄文案这一步（文案要一字不差，手抄容易错）。
 
-        只覆盖 Element UI 常见的下拉/菜单结构，抓不到就返回空列表，不影响
-        手动填 languages.options 的老路径（这条本来就是可选的辅助功能）。
+        点击前后各拍一次"当前可见的短文本"快照，取差集当作候选项——不猜
+        具体是哪个框架、哪套 class 命名，点开之后新冒出来的字就是候选，
+        抓不到就返回空列表，不影响手动填 languages.options 的老路径。
         """
         try:
+            before = set(self.page.evaluate(self._VISIBLE_LEAF_TEXTS_JS))
+        except Exception:
+            before = set()
+        try:
             self.page.locator(switcher_trigger).first.click(timeout=5000)
-            self.page.wait_for_timeout(400)
+            self.page.wait_for_timeout(500)
         except Exception:
             return []
-        sel = (".el-dropdown-menu:visible .el-dropdown-menu__item, "
-              ".el-dropdown-menu:visible li, "
-              ".el-select-dropdown:visible .el-select-dropdown__item, "
-              ".el-menu--popup:visible .el-menu-item, "
-              ".el-popper:visible li, .el-popper:visible a")
         try:
-            texts = _unique([t.strip() for t in
-                            self.page.locator(sel).all_inner_texts() if t.strip()])
+            after = self.page.evaluate(self._VISIBLE_LEAF_TEXTS_JS)
         except Exception:
-            texts = []
+            after = []
         try:
             self.page.keyboard.press("Escape")
         except Exception:
             pass
-        return texts[:10]
+        seen = set()
+        new_texts = []
+        for t in after:
+            if t not in before and t not in seen:
+                seen.add(t)
+                new_texts.append(t)
+        return new_texts[:15]
 
 
 def probe_languages(url: str, switcher_trigger: str, storage_state: Optional[str] = None,

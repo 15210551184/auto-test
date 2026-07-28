@@ -184,11 +184,9 @@ class ToConfigPropagatesVariantsTests(unittest.TestCase):
 
 
 class FakeMenuLocator:
-    """极简 locator 桩：click 记调用，all_inner_texts 按选择器返回预设文案。"""
+    """极简 locator 桩：click 记调用，能配置成点击失败。"""
 
-    def __init__(self, texts_by_sel, sel="", raise_on_click=False):
-        self._texts_by_sel = texts_by_sel
-        self._sel = sel
+    def __init__(self, raise_on_click=False):
         self._raise_on_click = raise_on_click
 
     @property
@@ -199,13 +197,15 @@ class FakeMenuLocator:
         if self._raise_on_click:
             raise TimeoutError("locator.click: Timeout exceeded")
 
-    def all_inner_texts(self):
-        return self._texts_by_sel.get(self._sel, [])
-
 
 class FakeMenuPage:
-    def __init__(self, texts_by_sel, raise_on_trigger_click=False):
-        self._texts_by_sel = texts_by_sel
+    """
+    evaluate() 按调用顺序依次返回 snapshots 里的值——第一次是点击前的
+    "当前可见文本"快照，第二次是点击后的快照，探测逻辑对这两次快照做差集。
+    """
+
+    def __init__(self, snapshots, raise_on_trigger_click=False):
+        self._snapshots = list(snapshots)
         self._raise_on_trigger_click = raise_on_trigger_click
         self.keyboard = types.SimpleNamespace(press=lambda k: None)
 
@@ -213,50 +213,54 @@ class FakeMenuPage:
         pass
 
     def locator(self, sel):
-        raise_click = self._raise_on_trigger_click and sel == ".lang-switch"
-        return FakeMenuLocator(self._texts_by_sel, sel, raise_on_click=raise_click)
+        return FakeMenuLocator(raise_on_click=self._raise_on_trigger_click)
 
     def wait_for_timeout(self, ms):
         pass
 
+    def evaluate(self, js):
+        return self._snapshots.pop(0)
+
 
 class ProbeLanguageOptionsTests(unittest.TestCase):
     """
-    探测语言选项：点开切换控件，把弹出菜单里的文案读出来，省掉手动 F12
-    照抄的步骤——抄错一个字 switch_language 就永远匹配不上。
+    探测语言选项：点开切换控件，把点击前后"新冒出来的可见文本"读出来，
+    省掉手动 F12 照抄的步骤——抄错一个字 switch_language 就永远匹配不上。
+    差集而非固定选择器，是因为语言切换菜单没有统一的框架/DOM 约定。
     """
 
-    def test_reads_and_dedups_menu_texts(self):
-        menu_sel = (".el-dropdown-menu:visible .el-dropdown-menu__item, "
-                   ".el-dropdown-menu:visible li, "
-                   ".el-select-dropdown:visible .el-select-dropdown__item, "
-                   ".el-menu--popup:visible .el-menu-item, "
-                   ".el-popper:visible li, .el-popper:visible a")
-        page = FakeMenuPage({menu_sel: [" 中文 ", "English", "中文", ""]})
+    def test_reads_new_texts_after_click(self):
+        before = ["搜索", "重置", "新增"]
+        after = ["搜索", "重置", "新增", "中文", "English"]
+        page = FakeMenuPage([before, after])
         sc = PageScanner(page)
         texts = sc.probe_language_options(".lang-switch")
         self.assertEqual(["中文", "English"], texts)
 
-    def test_trigger_not_found_returns_empty(self):
-        page = FakeMenuPage({}, raise_on_trigger_click=True)
+    def test_trigger_click_failure_returns_empty(self):
+        page = FakeMenuPage([[]], raise_on_trigger_click=True)
         sc = PageScanner(page)
         self.assertEqual([], sc.probe_language_options(".lang-switch"))
 
-    def test_no_matching_menu_structure_returns_empty(self):
-        page = FakeMenuPage({})   # 点开了，但没有任何选择器命中
+    def test_nothing_new_appeared_returns_empty(self):
+        same = ["搜索", "重置"]
+        page = FakeMenuPage([same, same])   # 点开了，但页面上没有新文本出现
         sc = PageScanner(page)
         self.assertEqual([], sc.probe_language_options(".lang-switch"))
 
-    def test_truncates_to_ten(self):
-        menu_sel = (".el-dropdown-menu:visible .el-dropdown-menu__item, "
-                   ".el-dropdown-menu:visible li, "
-                   ".el-select-dropdown:visible .el-select-dropdown__item, "
-                   ".el-menu--popup:visible .el-menu-item, "
-                   ".el-popper:visible li, .el-popper:visible a")
-        many = [f"L{i}" for i in range(15)]
-        page = FakeMenuPage({menu_sel: many})
+    def test_dedups_repeated_new_text(self):
+        before = []
+        after = ["中文", "中文", "English"]
+        page = FakeMenuPage([before, after])
         sc = PageScanner(page)
-        self.assertEqual(10, len(sc.probe_language_options(".lang-switch")))
+        self.assertEqual(["中文", "English"], sc.probe_language_options(".lang-switch"))
+
+    def test_truncates_to_fifteen(self):
+        before = []
+        after = [f"L{i}" for i in range(20)]
+        page = FakeMenuPage([before, after])
+        sc = PageScanner(page)
+        self.assertEqual(15, len(sc.probe_language_options(".lang-switch")))
 
 
 if __name__ == "__main__":
