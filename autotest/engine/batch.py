@@ -35,7 +35,7 @@ from . import project as P
 from . import scanner
 from .login import LoginError, ensure_logged_in
 from .models import CaseResult, PageResult, Status
-from .runner import Context, load_config, run_case
+from .runner import Context, filter_cases_by_tags, load_config, run_case
 from .state import save_storage_state, valid_storage_state
 
 # 单页扫描的硬超时。scanner.scan() 内部各步骤都有超时，但加总起来（多个下拉框
@@ -135,6 +135,7 @@ def scan_selected(dir_name: str, storage_state: Optional[str] = None,
 def run_selected(dir_name: str, out_dir: str,
                  storage_state: Optional[str] = None,
                  only_tags: Optional[List[str]] = None,
+                 exclude_tags: Optional[List[str]] = None,
                  on_log: Callable = None,
                  concurrency: int = DEFAULT_CONCURRENCY) -> List[PageResult]:
     """
@@ -233,9 +234,7 @@ def run_selected(dir_name: str, out_dir: str,
             ctx = Context(page, cfg, page_out)
             pr = PageResult(cfg.name, cfg.url)
 
-            cases = cfg.cases
-            if only_tags:
-                cases = [c for c in cases if set(c.tags) & set(only_tags)]
+            cases = filter_cases_by_tags(cfg.cases, only_tags, exclude_tags)
 
             for case in cases:
                 cr = run_case(ctx, case)

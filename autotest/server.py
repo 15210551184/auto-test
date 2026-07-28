@@ -391,6 +391,9 @@ def api_run():
         tags = body.get("tags")
         if tags:
             cmd += ["--tags"] + tags
+        exclude_tags = body.get("exclude_tags")
+        if exclude_tags:
+            cmd += ["--exclude-tags"] + exclude_tags
         name = f"执行 {cfg}"
     elif action == "test-login":
         cmd = [PY, "cli.py", "test-login", f"configs/{cfg}"]
@@ -408,6 +411,8 @@ def api_run():
             cmd.append("--overwrite")
         if action == "batch-run" and body.get("tags"):
             cmd += ["--tags"] + body["tags"]
+        if action == "batch-run" and body.get("exclude_tags"):
+            cmd += ["--exclude-tags"] + body["exclude_tags"]
         name = {"discover": f"扫描菜单 {d}", "batch-scan": f"生成用例 {d}",
                 "batch-run": f"批量执行 {d}"}[action]
 

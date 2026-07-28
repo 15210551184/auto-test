@@ -114,6 +114,23 @@ class Context:
 
 # ---------- 配置加载 ----------
 
+def filter_cases_by_tags(cases: List[Case], only_tags: Optional[List[str]] = None,
+                         exclude_tags: Optional[List[str]] = None) -> List[Case]:
+    """
+    only_tags：只跑带这些标签的用例；exclude_tags：排除带这些标签的用例。
+    两者可以一起用（先只跑，再从里面排除）；都不传就是全部跑。
+
+    exclude 存在的意义是"以后加新标签不用记得去改include名单"——比如不想跑
+    多语言检查，只排除 i18n 一个标签就行，不用把 smoke/health/search/list/
+    export/crud 全部勾一遍还要记得以后新加的标签也要勾上。
+    """
+    if only_tags:
+        cases = [c for c in cases if set(c.tags) & set(only_tags)]
+    if exclude_tags:
+        cases = [c for c in cases if not (set(c.tags) & set(exclude_tags))]
+    return cases
+
+
 def load_config(path: str) -> PageConfig:
     raw = yaml.safe_load(Path(path).read_text(encoding="utf-8"))
     cases = []
@@ -226,7 +243,8 @@ def run_case(ctx: Context, case: Case) -> CaseResult:
 
 def run_page(config: PageConfig, out_dir: str, headless: bool = True,
              storage_state: Optional[str] = None, slow_mo: int = 0,
-             only_tags: Optional[List[str]] = None) -> PageResult:
+             only_tags: Optional[List[str]] = None,
+             exclude_tags: Optional[List[str]] = None) -> PageResult:
     t0 = time.time()
     result = PageResult(config.name, config.url)
 
@@ -259,9 +277,7 @@ def run_page(config: PageConfig, out_dir: str, headless: bool = True,
                 print(f"  ✗ 登录失败: {e}")
                 return result
 
-        cases = config.cases
-        if only_tags:
-            cases = [c for c in cases if set(c.tags) & set(only_tags)]
+        cases = filter_cases_by_tags(config.cases, only_tags, exclude_tags)
 
         for ci, case in enumerate(cases, 1):
             print(f"  ▶ {case.name} ... ", end="", flush=True)
