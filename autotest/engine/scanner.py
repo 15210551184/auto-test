@@ -65,6 +65,31 @@ class PageScanner:
         self._resolve_cascading_selects(fields)
         return fields
 
+    def scan_form_labels(self) -> List[str]:
+        """
+        跟 scan_form() 完全一样的过滤条件（同一个 item 判定是否算一个字段），
+        只取 label 文案，不探测类型/选项——给多语言合并用，不产生"点开
+        下拉""级联试选"这些副作用，也不会因为副作用打乱页面状态。
+        """
+        labels = []
+        items = self.page.locator(".el-form-item")
+        for i in range(items.count()):
+            item = items.nth(i)
+            try:
+                label = item.locator(".el-form-item__label").first.inner_text().strip()
+            except Exception:
+                continue
+            label = label.rstrip(":：").strip()
+            if not label:
+                continue
+            has_field = (item.locator(".el-date-editor").count() > 0
+                        or item.locator(".el-select").count() > 0
+                        or item.locator(".el-input__inner").count() > 0)
+            if not has_field:
+                continue
+            labels.append(label)
+        return labels
+
     def _form_item_by_label(self, label: str):
         items = self.page.locator(".el-form-item")
         for i in range(items.count()):
@@ -149,10 +174,19 @@ class PageScanner:
     # 全是现成的（必填 = .el-form-item.is-required，长度 = input 的 maxlength），
     # 读出来就能自动生成必填校验、边界校验、填表闭环验证，不需要人工配业务规则。
 
-    def scan_form_schema(self, trigger: str = "新增") -> Dict[str, Any]:
+    def _creation_trigger(self):
+        """
+        按钮文案跟 i18n_terms 的 "create" 词表比对，而不是死认中文"新增"——
+        扫描阶段页面语言不一定是中文（比如项目默认英文界面），死认字面量会
+        导致 scan_buttons() 判断有新增按钮，但这里点不开弹窗。
+        """
+        words = _i18n_words("create")
+        sel = ", ".join(f"button:has-text('{w}'), a:has-text('{w}')" for w in words)
+        return self.page.locator(sel).first
+
+    def scan_form_schema(self) -> Dict[str, Any]:
         """点开新增弹窗扫字段结构，扫完关掉。点不开就返回空，不影响其他扫描。"""
-        btn = self.page.locator(
-            f"button:has-text('{trigger}'), a:has-text('{trigger}')").first
+        btn = self._creation_trigger()
         try:
             if btn.count() == 0:
                 return {}
@@ -183,6 +217,42 @@ class PageScanner:
             # 不在这里维护第二份（这里和运行期用的是同一套 Element UI 约定）
             self._ui.close_dialog(self.page)
         return {"title": title, "fields": fields} if fields else {}
+
+    def scan_dialog_labels(self) -> List[str]:
+        """
+        跟 scan_form_schema 走同样的开关弹窗流程，但只取 label 文案、不做
+        类型/选项探测——给多语言合并用，过滤条件和 _scan_dialog_fields
+        完全一致，保证下标能对齐。
+        """
+        btn = self._creation_trigger()
+        try:
+            if btn.count() == 0:
+                return []
+            btn.click(timeout=3000)
+        except Exception:
+            return []
+        dialog = self.page.locator(
+            ".el-dialog__wrapper:visible .el-dialog, .el-drawer:visible").last
+        try:
+            dialog.wait_for(state="visible", timeout=5000)
+        except Exception:
+            return []
+        self.page.wait_for_timeout(600)
+        labels = []
+        try:
+            items = dialog.locator(".el-form-item")
+            for i in range(items.count()):
+                item = items.nth(i)
+                try:
+                    label = item.locator(".el-form-item__label").first.inner_text().strip()
+                except Exception:
+                    continue
+                label = label.rstrip(":：").strip().lstrip("*").strip()
+                if label:
+                    labels.append(label)
+        finally:
+            self._ui.close_dialog(self.page)
+        return labels
 
     def _scan_dialog_fields(self, dialog) -> List[Dict[str, Any]]:
         out = []
@@ -254,19 +324,32 @@ class PageScanner:
             return []
 
     # ---------- 表格识别 ----------
-    def scan_table(self) -> Dict[str, Any]:
+    def _locate_table(self):
+        """挑出页面上真正的数据表格（可见、表头非空）。找不到就是 None。"""
         tables = self.page.locator(".el-table, .ant-table, table.data-table, table")
-        tbl = None
         for i in range(tables.count()):
             candidate = tables.nth(i)
             try:
                 headers = candidate.locator(
                     ".el-table__header-wrapper th .cell, .ant-table-thead th, thead th").all_inner_texts()
                 if candidate.is_visible() and any(h.strip() for h in headers):
-                    tbl = candidate
-                    break
+                    return candidate
             except Exception:
                 continue
+        return None
+
+    def scan_table_headers(self) -> List[str]:
+        """只取表头文案，用于多语言合并——跟 scan_table() 用同一套表格定位/
+        表头容器逻辑，保证下标能和默认语言那次扫描的 headers 对齐。"""
+        tbl = self._locate_table()
+        if tbl is None:
+            return []
+        header_cells = tbl.locator(
+            ".el-table__header-wrapper, .ant-table-thead, thead").first.locator("th .cell, th")
+        return _unique([h.strip() for h in header_cells.all_inner_texts() if h.strip()])
+
+    def scan_table(self) -> Dict[str, Any]:
+        tbl = self._locate_table()
         if tbl is None:
             return {}
 
@@ -347,9 +430,79 @@ class PageScanner:
         path = urlparse(pick).path
         return path if len(path) > 1 else None
 
+    # ---------- 多语言合并 ----------
+    def switch_language(self, languages: Dict[str, Any], code: str) -> bool:
+        """
+        跟运行期 switch_language 动作同样的交互逻辑：点触发器，点目标语言的
+        文字。扫描阶段容错，切不过去就返回 False 跳过这门语言，不影响其它
+        语言、也不影响后面别的扫描项。
+        """
+        target_text = (languages.get("options") or {}).get(code)
+        if not target_text:
+            return False
+        try:
+            self.page.locator(languages["switcher_trigger"]).first.click(timeout=5000)
+            self.page.wait_for_timeout(300)
+            self.page.get_by_text(target_text, exact=True).first.click(timeout=5000)
+            self.page.wait_for_timeout(800)
+            return True
+        except Exception:
+            return False
+
+    def scan_language_variants(self, languages: Optional[Dict[str, Any]],
+                               report: Dict[str, Any]) -> "tuple[Dict, Dict]":
+        """
+        依次切到配置里的每种语言，把搜索表单 label / 表格表头 / 新增弹窗
+        字段 label 按 DOM 位置和默认语言（扫描时最先拿到的 canonical 文案，
+        也是所有 case YAML 里继续使用的值）对齐，拼出 label_variants /
+        header_variants。
+
+        没配 languages.switcher_trigger/options 就是单语言页面，直接返回
+        空字典——不强求每个项目都配多语言。
+        """
+        label_variants: Dict[str, Dict[str, str]] = {}
+        header_variants: Dict[str, Dict[str, str]] = {}
+        if not (languages and languages.get("switcher_trigger") and languages.get("options")):
+            return label_variants, header_variants
+
+        canonical_labels = [f["label"] for f in report.get("form_fields", [])]
+        canonical_headers = _unique(report.get("table", {}).get("headers", []))
+        canonical_dialog_labels = [f["label"] for f in
+                                   (report.get("create_form") or {}).get("fields", [])]
+        has_create = report.get("buttons", {}).get("create", False)
+
+        for code in languages["options"]:
+            if not self.switch_language(languages, code):
+                continue
+            _merge_positional(label_variants, canonical_labels,
+                              self.scan_form_labels(), code)
+            _merge_positional(header_variants, canonical_headers,
+                              self.scan_table_headers(), code)
+            if has_create and canonical_dialog_labels:
+                _merge_positional(label_variants, canonical_dialog_labels,
+                                  self.scan_dialog_labels(), code)
+
+        return label_variants, header_variants
+
+
+def _merge_positional(variants: Dict[str, Dict[str, str]], canonical: List[str],
+                      translated: List[str], code: str) -> None:
+    """
+    按下标对齐 canonical 和 translated 两个列表。数量对不上（比如某种语言下
+    少渲染了一个字段）就整批跳过，宁可缺失也不错配——错配会把「国家」的
+    翻译记成「城市」的，之后按翻译反查 canonical 全部乱套。
+    """
+    if len(canonical) != len(translated):
+        return
+    for c, t in zip(canonical, translated):
+        if not c or not t or c == t:
+            continue
+        variants.setdefault(c, {})[code] = t
+
 
 def scan(url: str, storage_state: Optional[str] = None,
-         headless: bool = True, wait: int = 3000) -> Dict[str, Any]:
+         headless: bool = True, wait: int = 3000,
+         languages: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     with sync_playwright() as pw:
         browser = B.launch(pw, headless=headless)
         args = B.context_args()
@@ -380,7 +533,14 @@ def scan(url: str, storage_state: Optional[str] = None,
         # 表单结构放最后扫：它要点开弹窗，对页面状态的改动最大，
         # 放前面会影响表格/按钮的识别
         if report["buttons"].get("create"):
-            report["create_form"] = sc.scan_form_schema("新增")
+            report["create_form"] = sc.scan_form_schema()
+        # 多语言合并放最后：要来回切换语言、重新扫表单/表头，对页面状态
+        # 改动更大，放前面会干扰上面这些默认语言下的扫描结果
+        label_variants, header_variants = sc.scan_language_variants(languages, report)
+        if label_variants:
+            report["label_variants"] = label_variants
+        if header_variants:
+            report["header_variants"] = header_variants
         browser.close()
     return report
 
@@ -575,6 +735,10 @@ def to_config(report: Dict[str, Any], name: Optional[str] = None,
         cfg["export_mode"] = "auto"
     if languages:
         cfg["languages"] = languages
+    if report.get("label_variants"):
+        cfg["label_variants"] = report["label_variants"]
+    if report.get("header_variants"):
+        cfg["header_variants"] = report["header_variants"]
     cfg["cases"] = cases
     return cfg
 

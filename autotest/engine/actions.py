@@ -79,20 +79,20 @@ def do_fill(ctx, label: str = None, value: Any = None, selector: str = None, **k
     if selector:
         ctx.page.locator(ctx.selector(selector)).first.fill(str(v))
     else:
-        ctx.ui.fill(ctx.page, label, v)
+        ctx.ui.fill(ctx.page, ctx.label_of(label), v)
     return f"{label or selector} = {v}"
 
 
 @action("select")
 def do_select(ctx, label: str = None, option: str = None, index: int = None, **kw):
-    picked = ctx.ui.select(ctx.page, label, option=option, index=index)
+    picked = ctx.ui.select(ctx.page, ctx.label_of(label), option=option, index=index)
     ctx.vars[f"selected_{label}"] = picked
     return f"{label} 选中 '{picked}'"
 
 
 @action("date_range")
 def do_date_range(ctx, label: str = None, start: str = None, end: str = None, **kw):
-    ctx.ui.date_range(ctx.page, label, ctx.resolve(start), ctx.resolve(end))
+    ctx.ui.date_range(ctx.page, ctx.label_of(label), ctx.resolve(start), ctx.resolve(end))
     return f"{label} = {start} ~ {end}"
 
 
@@ -243,7 +243,7 @@ def as_no_render_garbage(ctx, columns: list = None, extra: list = None, **kw):
     扫全表找渲染异常，零配置就能抓"接口对但前端展示错"那一类：
     undefined/null/NaN/[object Object]/Invalid Date，以及时间列里的裸时间戳。
     """
-    data = ctx.ui.table_data(ctx.page)
+    data = ctx.table_data()
     if not data:
         return "列表为空，跳过渲染检查"
     exact = set(_GARBAGE_EXACT) | {str(e).lower() for e in (extra or [])}
@@ -313,7 +313,7 @@ def as_no_i18n_leak(ctx, columns: list = None, **kw):
     占位符（如 '{{xxx}}'）——翻译文件漏配某个 key 时，前端常见的失败模式
     是直接显示 key 本身而不是报错，人工核对很容易漏看。
     """
-    data = ctx.ui.table_data(ctx.page)
+    data = ctx.table_data()
     if not data:
         return "列表为空，跳过翻译泄漏检查"
     cols = columns or list(data[0].keys())
@@ -347,7 +347,7 @@ def as_no_mixed_language(ctx, expect: str = None, columns: list = None, **kw):
         raise LookupError("不知道当前应该是什么语言：传 expect 参数，或者先执行 switch_language")
     if lang == "zh":
         return "当前语言是中文，跳过混用检查"
-    data = ctx.ui.table_data(ctx.page)
+    data = ctx.table_data()
     if not data:
         return "列表为空，跳过多语言检查"
     cols = columns or list(data[0].keys())
@@ -372,8 +372,9 @@ def do_check_select_options(ctx, label: str = None, max_options: int = 6, **kw):
     循环结束后 ${selected_label} 停在最后一个选项，供后续列断言复用。
     """
     page, ui = ctx.page, ctx.ui
+    candidates = ctx.label_of(label)
     try:
-        raw_opts = ui.list_options(page, label)
+        raw_opts = ui.list_options(page, candidates)
     except Exception:
         # 级联选择器（如「城市」依赖「国家」）在父级没选时点不开，属于正常情况
         # （扫描阶段已经因为取不到选项而不会生成这条用例；这里是手写配置时的兜底）
@@ -385,7 +386,7 @@ def do_check_select_options(ctx, label: str = None, max_options: int = 6, **kw):
     for o in opts:
         base = len(ctx.console_errors)
         try:
-            picked = ui.select(page, label, option=o)
+            picked = ui.select(page, candidates, option=o)
         except Exception as e:
             problems.append(f"选项 '{o}' 选择失败: {type(e).__name__}")
             continue
@@ -408,7 +409,7 @@ def do_check_select_options(ctx, label: str = None, max_options: int = 6, **kw):
 def do_capture(ctx, name: str = "snapshot", value: str = None, **kw):
     """把当前表格快照存进变量池，供后面和导出文件比对"""
     key = value or name
-    ctx.data[key] = ctx.ui.table_data(ctx.page)
+    ctx.data[key] = ctx.table_data()
     return f"抓取 {len(ctx.data[key])} 行到 '{key}'"
 
 
@@ -417,7 +418,7 @@ def do_capture_all(ctx, name: str = "all_pages", max_pages: int = 20, **kw):
     """翻页抓全量，用于和全量导出比对"""
     rows, pages = [], 0
     while pages < max_pages:
-        rows.extend(ctx.ui.table_data(ctx.page))
+        rows.extend(ctx.table_data())
         pages += 1
         if not ctx.ui.next_page(ctx.page):
             break
@@ -442,7 +443,7 @@ def as_row_count(ctx, min: int = None, max: int = None, equals: int = None, **kw
 
 @action("assert_headers")
 def as_headers(ctx, contains: list = None, equals: list = None, value: list = None, **kw):
-    hs = ctx.ui.headers(ctx.page)
+    hs = ctx.canonical_headers()
     want = contains or value
     if equals is not None and hs != equals:
         _fail(f"表头不匹配\n期望: {equals}\n实际: {hs}{_diag_suffix(ctx)}")
@@ -457,7 +458,7 @@ def as_headers(ctx, contains: list = None, equals: list = None, value: list = No
 def as_col_all(ctx, column: str = None, equals: Any = None, contains: str = None,
                matches: str = None, kind: str = "auto", **kw):
     """搜索条件的核心断言：某列所有值都满足条件"""
-    vals = ctx.ui.column_values(ctx.page, column)
+    vals = ctx.ui.column_values(ctx.page, ctx.column_of(column))
     if not vals:
         return "列表为空，跳过列值校验"
     bad = []
@@ -480,7 +481,7 @@ def as_col_all(ctx, column: str = None, equals: Any = None, contains: str = None
 def as_col_range(ctx, column: str = None, start: str = None, end: str = None,
                  kind: str = "date", **kw):
     """时间/数值范围筛选断言"""
-    vals = ctx.ui.column_values(ctx.page, column)
+    vals = ctx.ui.column_values(ctx.page, ctx.column_of(column))
     fn = N.TYPE_MAP.get(kind, N.auto)
     lo, hi = (fn(ctx.resolve(start)) if start else None), (fn(ctx.resolve(end)) if end else None)
     bad = []
@@ -500,7 +501,7 @@ def as_col_range(ctx, column: str = None, start: str = None, end: str = None,
 @action("assert_column_not_empty")
 def as_col_not_empty(ctx, column: str = None, value: str = None, allow_ratio: float = 0.0, **kw):
     col = column or value
-    vals = ctx.ui.column_values(ctx.page, col)
+    vals = ctx.ui.column_values(ctx.page, ctx.column_of(col))
     if not vals:
         return "列表为空"
     empties = [i for i, v in enumerate(vals) if N.is_empty(v)]
@@ -512,7 +513,7 @@ def as_col_not_empty(ctx, column: str = None, value: str = None, allow_ratio: fl
 
 @action("assert_sorted")
 def as_sorted(ctx, column: str = None, order: str = "desc", kind: str = "auto", **kw):
-    vals = [N.TYPE_MAP.get(kind, N.auto)(v) for v in ctx.ui.column_values(ctx.page, column)]
+    vals = [N.TYPE_MAP.get(kind, N.auto)(v) for v in ctx.ui.column_values(ctx.page, ctx.column_of(column))]
     vals = [v for v in vals if v is not None]
     if len(vals) < 2:
         return "数据不足，跳过排序校验"
@@ -529,7 +530,7 @@ def as_inputs_empty(ctx, labels: list = None, value: list = None, **kw):
     dirty = []
     for lb in (labels or value or []):
         try:
-            v = ctx.ui.get_input_value(ctx.page, lb)
+            v = ctx.ui.get_input_value(ctx.page, ctx.label_of(lb))
             if not N.is_empty(v):
                 dirty.append(f"{lb}='{v}'")
         except LookupError:
@@ -559,7 +560,7 @@ def as_api_table(ctx, list_path: str = "data.records", mapping: dict = None, **k
     if not isinstance(node, list) or not node:
         return "接口返回空列表，跳过"
 
-    table = ctx.ui.table_data(ctx.page)
+    table = ctx.table_data()
     if len(table) != len(node):
         _fail(f"接口返回 {len(node)} 条，表格渲染 {len(table)} 行")
 
@@ -585,9 +586,9 @@ def do_fill_form(ctx, fields: dict = None, in_dialog: bool = True, **kw):
     for label, raw in (fields or {}).items():
         v = ctx.resolve(raw)
         try:
-            ctx.ui.fill(ctx.page, label, v)
+            ctx.ui.fill(ctx.page, ctx.label_of(label), v)
         except LookupError:
-            ctx.ui.select(ctx.page, label, option=str(v))
+            ctx.ui.select(ctx.page, ctx.label_of(label), option=str(v))
         filled[label] = v
         ctx.vars[f"form_{label}"] = v
     return f"填写 {len(filled)} 个字段: {filled}"
@@ -612,7 +613,7 @@ def as_in_list(ctx, column: str = None, value: str = None, **kw):
     只断言 toast 成功是没有意义的 —— 提示成功但数据没落库的 bug 很常见。
     """
     expect = ctx.resolve(value)
-    vals = ctx.ui.column_values(ctx.page, column)
+    vals = ctx.ui.column_values(ctx.page, ctx.column_of(column))
     if not any(N.compare(v, expect) for v in vals):
         _fail(f"列 '{column}' 中找不到刚提交的值 '{expect}'，当前列值: {vals[:5]}")
     return f"列表中找到 '{expect}' ✓"
@@ -695,6 +696,7 @@ def _fill_fields(ctx, fields: List[Dict[str, Any]], values: Dict[str, Any]) -> N
     by_label = {f["label"]: f for f in fields}
     for label, v in values.items():
         f = by_label.get(label, {"label": label, "type": "text"})
+        f = dict(f, label=ctx.label_of(f["label"]))
         ctx.ui.set_field_value(ctx.page, f, v)
 
 
@@ -714,7 +716,7 @@ def as_form_errors(ctx, expect: list = None, **kw):
     断言该报错的字段都报错了。expect 不给就只要求"至少报了点什么"。
     """
     _submit(ctx)
-    got = ctx.ui.form_error_labels(ctx.page)
+    got = ctx.form_error_labels()
     if not got:
         texts = ctx.ui.form_error_texts(ctx.page)
         if texts:
@@ -760,14 +762,14 @@ def do_create_and_verify(ctx, fields: list = None, identity: str = None,
 
     ident_val = str(values[identity])
     try:
-        ctx.ui.fill(ctx.page, identity, ident_val)
+        ctx.ui.fill(ctx.page, ctx.label_of(identity), ident_val)
         do_search(ctx)
     except LookupError:
         # identity 字段不在搜索表单里（不是每个新增字段都能搜），退回整页扫
         do_search(ctx)
 
-    row = ctx.ui.find_row_by(ctx.page, identity_column, ident_val)
-    row_data = ctx.ui.table_data(ctx.page)[row]
+    row = ctx.find_row_by(identity_column, ident_val)
+    row_data = ctx.table_data()[row]
 
     diffs = []
     checked = 0
@@ -802,11 +804,11 @@ def as_form_prefilled(ctx, identity_column: str = None, action: str = "编辑", 
     if not identity_column or ident_val is None:
         _fail("没有可用的记录定位信息，请先执行 create_and_verify")
 
-    row = ctx.ui.find_row_by(ctx.page, identity_column, ident_val)
-    row_data = ctx.ui.table_data(ctx.page)[row]
+    row = ctx.find_row_by(identity_column, ident_val)
+    row_data = ctx.table_data()[row]
     ctx.ui.row_action(ctx.page, row, action)
 
-    form_vals = ctx.ui.dialog_field_values(ctx.page)
+    form_vals = ctx.dialog_field_values()
     diffs = []
     checked = 0
     for label, list_val in row_data.items():
@@ -842,8 +844,8 @@ def do_edit_and_verify(ctx, fields: dict = None, identity_column: str = None, **
         _fail(f"提交后提示: '{msg}'，疑似保存失败")
 
     # identity 本身没改的话，还是用老值去定位这一行
-    row = ctx.ui.find_row_by(ctx.page, identity_column, ident_val)
-    row_data = ctx.ui.table_data(ctx.page)[row]
+    row = ctx.find_row_by(identity_column, ident_val)
+    row_data = ctx.table_data()[row]
     diffs = []
     for label, v in resolved.items():
         col_val = row_data.get(label)
@@ -868,11 +870,11 @@ def as_detail_matches(ctx, identity_column: str = None, action: str = "查看", 
     if not identity_column or ident_val is None:
         _fail("没有可用的记录定位信息，请先执行 create_and_verify")
 
-    row = ctx.ui.find_row_by(ctx.page, identity_column, ident_val)
-    row_data = ctx.ui.table_data(ctx.page)[row]
+    row = ctx.find_row_by(identity_column, ident_val)
+    row_data = ctx.table_data()[row]
     ctx.ui.row_action(ctx.page, row, action)
 
-    detail = ctx.ui.detail_values(ctx.page)
+    detail = ctx.detail_values()
     if ctx.ui.dialog_visible(ctx.page):
         ctx.ui.close_dialog(ctx.page)
     diffs = []
@@ -906,7 +908,7 @@ def do_delete_and_verify(ctx, identity_column: str = None, action: str = "删除
              f"为避免误删真实数据，拒绝执行删除")
 
     try:
-        row = ctx.ui.find_row_by(ctx.page, identity_column, ident_val)
+        row = ctx.find_row_by(identity_column, ident_val)
     except LookupError:
         return "记录已不在列表中，可能已被清理"
     ctx.ui.row_action(ctx.page, row, action)
@@ -918,7 +920,7 @@ def do_delete_and_verify(ctx, identity_column: str = None, action: str = "删除
     ctx.page.wait_for_timeout(600)
 
     try:
-        ctx.ui.find_row_by(ctx.page, identity_column, ident_val)
+        ctx.find_row_by(identity_column, ident_val)
         _fail(f"删除后记录仍在列表中: {ident_val}")
     except LookupError:
         pass
@@ -942,8 +944,8 @@ def do_toggle_status(ctx, column: str = "状态", action: str = None,
     if not DF.is_auto_data(ident_val):
         _fail(f"'{ident_val}' 不像是自动化创建的数据，拒绝操作其状态")
 
-    row = ctx.ui.find_row_by(ctx.page, identity_column, ident_val)
-    before = ctx.ui.table_data(ctx.page)[row].get(column)
+    row = ctx.find_row_by(identity_column, ident_val)
+    before = ctx.table_data()[row].get(column)
 
     act = action or ctx.ui.find_row_toggle_text(ctx.page, row)
     if not act:
@@ -956,8 +958,8 @@ def do_toggle_status(ctx, column: str = "状态", action: str = None,
             pass
     ctx.page.wait_for_timeout(600)
 
-    row2 = ctx.ui.find_row_by(ctx.page, identity_column, ident_val)
-    after = ctx.ui.table_data(ctx.page)[row2].get(column)
+    row2 = ctx.find_row_by(identity_column, ident_val)
+    after = ctx.table_data()[row2].get(column)
     if before == after:
         _fail(f"点击「{act}」后「{column}」列没有变化，仍是 '{after}'")
     return f"状态切换通过：点「{act}」后「{column}」从 '{before}' 变为 '{after}' ✓"

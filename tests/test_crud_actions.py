@@ -70,11 +70,14 @@ class FakeUI:
         return FakeLocator()
 
     def fill(self, page, label, value):
-        self.filled[label] = value
+        # label 可能是 ctx.label_of() 解出的多语言候选列表，第一个永远是 canonical
+        key = label if isinstance(label, str) else label[0]
+        self.filled[key] = value
 
     def set_field_value(self, page, field, value):
-        self.set_calls.append((field.get("type"), field["label"], value))
-        self.filled[field["label"]] = value
+        key = field["label"] if isinstance(field["label"], str) else field["label"][0]
+        self.set_calls.append((field.get("type"), key, value))
+        self.filled[key] = value
 
     def table_data(self, page):
         return self.table
@@ -135,6 +138,30 @@ class FakeCrudCtx:
 
     def resolve(self, v):
         return v
+
+    def label_of(self, label):
+        return [label]
+
+    def column_of(self, column):
+        return [column]
+
+    def table_data(self):
+        return self.ui.table_data(self.page)
+
+    def find_row_by(self, column, value):
+        return self.ui.find_row_by(self.page, column, value)
+
+    def canonical_headers(self):
+        return self.ui.headers(self.page)
+
+    def dialog_field_values(self):
+        return self.ui.dialog_field_values(self.page)
+
+    def detail_values(self):
+        return self.ui.detail_values(self.page)
+
+    def form_error_labels(self):
+        return self.ui.form_error_labels(self.page)
 
 
 FIELDS = [

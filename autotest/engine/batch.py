@@ -55,7 +55,8 @@ def _log(cb, msg):
         cb(msg)
 
 
-def _scan_with_timeout(url: str, storage_state: Optional[str], timeout: int = SCAN_TIMEOUT_SEC) -> Dict:
+def _scan_with_timeout(url: str, storage_state: Optional[str], timeout: int = SCAN_TIMEOUT_SEC,
+                       languages: Optional[Dict] = None) -> Dict:
     """
     在子线程里跑 scanner.scan()，超时就放弃等待、把这一页判失败，不拖死整批任务。
 
@@ -68,7 +69,8 @@ def _scan_with_timeout(url: str, storage_state: Optional[str], timeout: int = SC
 
     def worker():
         try:
-            box["report"] = scanner.scan(url, storage_state=storage_state, headless=True)
+            box["report"] = scanner.scan(url, storage_state=storage_state, headless=True,
+                                         languages=languages)
         except Exception as e:
             box["error"] = e
 
@@ -114,7 +116,7 @@ def scan_selected(dir_name: str, storage_state: Optional[str] = None,
 
         try:
             _log(on_log, f"  [{i}/{len(pages)}] {name} — 扫描中…")
-            rep = _scan_with_timeout(url, storage_state)
+            rep = _scan_with_timeout(url, storage_state, languages=proj.get("languages"))
             cfg = scanner.to_config(rep, name=name, languages=proj.get("languages"))
             cfg = P.inject_project_settings(cfg, proj)
             dest.parent.mkdir(parents=True, exist_ok=True)
@@ -137,7 +139,8 @@ def run_selected(dir_name: str, out_dir: str,
                  only_tags: Optional[List[str]] = None,
                  exclude_tags: Optional[List[str]] = None,
                  on_log: Callable = None,
-                 concurrency: int = DEFAULT_CONCURRENCY) -> List[PageResult]:
+                 concurrency: int = DEFAULT_CONCURRENCY,
+                 target_language: Optional[str] = None) -> List[PageResult]:
     """
     执行勾选的页面，最多 concurrency 个页面并发跑（见模块头部说明）。
 
@@ -231,7 +234,7 @@ def run_selected(dir_name: str, out_dir: str,
 
             page_out = os.path.join(out_dir, f"{idx + 1:02d}_{P._safe(name)}")
             os.makedirs(page_out, exist_ok=True)
-            ctx = Context(page, cfg, page_out)
+            ctx = Context(page, cfg, page_out, target_language=target_language)
             pr = PageResult(cfg.name, cfg.url)
 
             cases = filter_cases_by_tags(cfg.cases, only_tags, exclude_tags)

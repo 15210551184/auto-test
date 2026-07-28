@@ -129,7 +129,7 @@ def cmd_batch_run(a):
     out = _outdir(P._safe(a.project))
     results = batch.run_selected(a.project, out, storage_state=a.state,
                                  only_tags=a.tags, exclude_tags=a.exclude_tags,
-                                 concurrency=a.concurrency)
+                                 concurrency=a.concurrency, target_language=a.lang)
     path = R.render(results, os.path.join(out, "report.html"))
     R.render_json(results, os.path.join(out, "result.json"))
     print(f"报告: {os.path.abspath(path)}")
@@ -141,7 +141,8 @@ def cmd_run(a):
     out = _outdir(os.path.basename(a.config).replace(".yaml", ""))
     print(f"执行 {cfg.name} ({len(cfg.cases)} 条用例)")
     res = run_page(cfg, out, headless=not a.headed, storage_state=a.state,
-                   slow_mo=a.slow, only_tags=a.tags, exclude_tags=a.exclude_tags)
+                   slow_mo=a.slow, only_tags=a.tags, exclude_tags=a.exclude_tags,
+                   target_language=a.lang)
     path = R.render([res], os.path.join(out, "report.html"))
     R.render_json([res], os.path.join(out, "result.json"))
     print(f"\n通过 {res.passed} / 失败 {res.failed} / 共 {len(res.cases)}")
@@ -188,6 +189,8 @@ def main():
     s3.add_argument("--slow", type=int, default=0, help="每步减速 ms，调试用")
     s3.add_argument("--tags", nargs="*", help="只跑指定 tag")
     s3.add_argument("--exclude-tags", nargs="*", help="排除指定 tag（比如 --exclude-tags i18n 跳过多语言检查）")
+    s3.add_argument("--lang", help="执行前先切到指定语言（config 里 languages.options 的 code），"
+                                   "跑完再验一遍其它用例在这门语言下是否正常")
     s3.set_defaults(func=cmd_run)
 
     s6 = sub.add_parser("menu", help="爬取系统菜单")
@@ -206,6 +209,7 @@ def main():
     s8.add_argument("--exclude-tags", nargs="*", help="排除指定 tag（比如 --exclude-tags i18n 跳过多语言检查）")
     s8.add_argument("--concurrency", type=int, default=batch.DEFAULT_CONCURRENCY,
                     help=f"并发跑几个页面，默认 {batch.DEFAULT_CONCURRENCY}；开太多 Chromium 标签页吃内存，服务器紧张就别调大")
+    s8.add_argument("--lang", help="执行前先切到指定语言（project.yaml 里 languages.options 的 code）")
     s8.set_defaults(func=cmd_batch_run)
 
     s5 = sub.add_parser("test-login", help="只验证账号密码能否登录")

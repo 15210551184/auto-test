@@ -13,6 +13,7 @@ import yaml
 from playwright.sync_api import sync_playwright, Page
 
 from . import browser as B
+from . import lang_variants as LV
 from . import progress
 from .actions import REGISTRY, AssertionFailed, AssertionWarning
 from .login import LoginError, ensure_logged_in, is_login_page
@@ -33,10 +34,16 @@ DEFAULT_SELECTORS = {
 class Context:
     """一次页面执行的上下文，贯穿所有 step"""
 
-    def __init__(self, page: Page, config: PageConfig, out_dir: str):
+    def __init__(self, page: Page, config: PageConfig, out_dir: str,
+                target_language: Optional[str] = None):
         self.page = page
         self.config = config
         self.ui = ElementUIAdapter()
+        # 用户在执行前选定的语言（对应 config.languages.options 里的某个 code）。
+        # 不为 None 时，run_case 会在每条用例重新导航之后、跑用例自己的步骤
+        # 之前，先切到这门语言——不是在这里切一次就完事，因为大多数系统语言
+        # 状态挂在前端 localStorage/内存里，用例之间的每次 goto 都会把它冲掉。
+        self.target_language = target_language
         self.vars: Dict[str, Any] = dict(config.variables)
         self.data: Dict[str, List[dict]] = {}   # capture 存的表格快照
         self.last_api: Optional[dict] = None
@@ -69,6 +76,45 @@ class Context:
         if not key:
             raise ValueError("选择器不能为空")
         return self.config.selectors.get(key, DEFAULT_SELECTORS.get(key, key))
+
+    def label_of(self, canonical: str) -> List[str]:
+        """
+        canonical label -> 所有已知语言下的候选文案（含它自己，排最前面）。
+        没配 label_variants 时就是只有它自己的单元素列表——适配层对单候选
+        和多候选走的是同一条路径，行为和只传字符串完全一样，不是两套逻辑。
+        """
+        return LV.candidates(self.config.label_variants, canonical)
+
+    def column_of(self, canonical: str) -> List[str]:
+        """同 label_of，用于表头列名。"""
+        return LV.candidates(self.config.header_variants, canonical)
+
+    def table_data(self):
+        """ctx.ui.table_data 的快捷方式，自动带上 header_variants。"""
+        return self.ui.table_data(self.page, header_variants=self.config.header_variants)
+
+    def find_row_by(self, column: str, value: str, table: str = ".el-table") -> int:
+        """ctx.ui.find_row_by 的快捷方式，自动带上 header_variants。"""
+        return self.ui.find_row_by(self.page, column, value, table,
+                                   header_variants=self.config.header_variants)
+
+    def canonical_headers(self) -> List[str]:
+        """当前表头翻译回 canonical 列名，供 assert_headers 按 canonical 名字比对。"""
+        raw = self.ui.headers(self.page)
+        rmap = LV.reverse_map(self.config.header_variants)
+        return [rmap.get(h, h) for h in raw]
+
+    def dialog_field_values(self) -> Dict[str, str]:
+        """ctx.ui.dialog_field_values 的快捷方式，自动带上 header_variants。"""
+        return self.ui.dialog_field_values(self.page, header_variants=self.config.header_variants)
+
+    def detail_values(self) -> Dict[str, str]:
+        """ctx.ui.detail_values 的快捷方式，自动带上 header_variants。"""
+        return self.ui.detail_values(self.page, header_variants=self.config.header_variants)
+
+    def form_error_labels(self) -> List[str]:
+        """ctx.ui.form_error_labels 的快捷方式，自动带上 header_variants。"""
+        return self.ui.form_error_labels(self.page, header_variants=self.config.header_variants)
 
     def resolve(self, value: Any) -> Any:
         """展开 ${var} / ${random} / ${today} 等占位符"""
@@ -152,6 +198,8 @@ def load_config(path: str) -> PageConfig:
         export_task_api=raw.get("export_task_api"),
         login=raw.get("login", {}),
         languages=raw.get("languages", {}),
+        label_variants=raw.get("label_variants", {}),
+        header_variants=raw.get("header_variants", {}),
     )
 
 
@@ -216,6 +264,12 @@ def run_case(ctx: Context, case: Case) -> CaseResult:
         except LoginError as e:
             return CaseResult(case.name, Status.ERROR, error=f"会话过期且重登失败: {e}")
 
+    if ctx.target_language:
+        try:
+            REGISTRY["switch_language"](ctx, to=ctx.target_language)
+        except Exception as e:
+            return CaseResult(case.name, Status.ERROR, error=f"切换语言失败: {e}")
+
     results, status = [], Status.PASS
     stopped_at = None
     for i, step in enumerate(case.steps):
@@ -244,7 +298,8 @@ def run_case(ctx: Context, case: Case) -> CaseResult:
 def run_page(config: PageConfig, out_dir: str, headless: bool = True,
              storage_state: Optional[str] = None, slow_mo: int = 0,
              only_tags: Optional[List[str]] = None,
-             exclude_tags: Optional[List[str]] = None) -> PageResult:
+             exclude_tags: Optional[List[str]] = None,
+             target_language: Optional[str] = None) -> PageResult:
     t0 = time.time()
     result = PageResult(config.name, config.url)
 
@@ -258,7 +313,7 @@ def run_page(config: PageConfig, out_dir: str, headless: bool = True,
         bctx.set_default_timeout(30000)
         page = bctx.new_page()
 
-        ctx = Context(page, config, out_dir)
+        ctx = Context(page, config, out_dir, target_language=target_language)
 
         # --- 登录：先试旧 cookie，失效才用账号密码登录 ---
         # 登录失败直接中止，不然每条用例都会在登录页上失败，报告全红没意义

@@ -52,6 +52,12 @@ class PageConfig:
     export_task_api: Optional[str] = None
     login: Dict[str, Any] = field(default_factory=dict)   # UI 自动登录配置
     languages: Dict[str, Any] = field(default_factory=dict)   # 语言切换控件配置
+    # 表单字段/表头列名的多语言文案："国家名称" 这个 canonical 名字继续用在
+    # 所有 step 的 label/column 参数里（已有配置不用改），执行时按当前语言
+    # 从这里查对应文案，查不到再挨个试——不需要知道当前是哪种语言。
+    # 结构：{canonical: {lang_code: 对应文案}}
+    label_variants: Dict[str, Dict[str, str]] = field(default_factory=dict)
+    header_variants: Dict[str, Dict[str, str]] = field(default_factory=dict)
 
 
 @dataclass

@@ -245,6 +245,16 @@ a.open:hover{text-decoration:underline}
           「生成用例」不会覆盖已有 YAML；「重新生成用例」会覆盖当前已勾选页面的 YAML。
           「执行测试」跑勾选的页面，全程只登录一次。
         </div>
+        <div class="tag-filter" id="langFilter" style="display:none;margin-bottom:8px">
+          <div class="tf-title">
+            执行语言<span class="tf-hint">（先选语言，再勾下面要跑的类别——除多语言检查外的用例都会先切到这门语言再跑，用来验证切换语言后功能是否还正常）</span>
+          </div>
+          <div class="tf-list">
+            <select id="langSelect" style="font-size:12.5px;padding:3px 6px">
+              <option value="">默认语言（不切换）</option>
+            </select>
+          </div>
+        </div>
         <div class="tag-filter">
           <div class="tf-title">
             只执行勾选的类别<span class="tf-hint">（都不选 = 全部一起跑；想漏掉一两类，点"全选"再取消勾选它们）</span>
@@ -321,7 +331,7 @@ async function loadProjects(keep){
   const ps = await get('/api/projects');
   const sel = $('#projSel'); sel.innerHTML='';
   if(!ps.length){ sel.innerHTML='<option value="">还没有系统</option>';
-    proj=null; pages=[]; renderTree(); return; }
+    proj=null; pages=[]; renderTree(); renderLangFilter(); return; }
   ps.forEach(p=>{const o=document.createElement('option');
     o.value=p.dir;o.textContent=p.name+'（'+p.page_count+' 页）';sel.appendChild(o);});
   if(keep && ps.some(p=>p.dir===keep)) sel.value=keep;
@@ -329,9 +339,18 @@ async function loadProjects(keep){
 }
 async function loadProject(){
   const d=$('#projSel').value;
-  if(!d){proj=null;pages=[];return renderTree();}
+  if(!d){proj=null;pages=[];renderLangFilter();return renderTree();}
   proj = await get('/api/projects/'+encodeURIComponent(d));
-  pages = proj.pages||[]; renderTree();
+  pages = proj.pages||[]; renderTree(); renderLangFilter();
+}
+function renderLangFilter(){
+  const box=$('#langFilter'), sel=$('#langSelect');
+  const options=(proj&&proj.languages&&proj.languages.options)||{};
+  const codes=Object.keys(options);
+  if(!codes.length){box.style.display='none';sel.innerHTML='<option value="">默认语言（不切换）</option>';return;}
+  box.style.display='';
+  sel.innerHTML='<option value="">默认语言（不切换）</option>'+
+    codes.map(c=>'<option value="'+esc(c)+'">'+esc(options[c])+'</option>').join('');
 }
 $('#projSel').onchange = loadProject;
 $('#btnFoldAll').onclick=()=>{
@@ -497,6 +516,7 @@ $('#yamlSave').onclick=async()=>{
   if(!r.ok||!r.data.ok)return toast(r.data.msg||'保存失败',true);
   mask.classList.remove('show');
   if(mask.dataset.kind==='project'){
+    await loadProject();   // 项目设置可能改了 languages，重新拉一份最新的 proj
     toast('项目设置已保存');
   }else{
     const p=pages[+mask.dataset.i];
@@ -659,6 +679,8 @@ async function trigger(action, overwrite=false){
   if(action==='batch-run'){
     const tags=selectedTags();
     if(tags.length) body.tags=tags;   // 都不选就不传 tags，后端默认跑全部
+    const lang=$('#langSelect').value;
+    if(lang) body.lang=lang;   // 不选就是默认语言，不切换
   }
   const r=await post('/api/run',body);
   if(!r.ok||!r.data.ok) return toast(r.data.msg||'启动失败',true);

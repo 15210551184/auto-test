@@ -6,11 +6,31 @@ Element UI 适配层。
 换成 Ant Design 只要再写一个同接口的适配器。
 """
 import re
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 
 from playwright.sync_api import Page, Locator
 
 from ..i18n_terms import words as _i18n_words
+from ..lang_variants import reverse_map as _reverse_variant_map
+
+# label/column 参数现在既可以是单个字符串，也可以是多语言候选文案列表
+# （调用方按 ctx.config.label_variants 解析出来的）——单字符串场景下面全部
+# 逻辑和原来完全一样，多候选只是多语言场景的扩展，不引入行为变化。
+LabelLike = Union[str, List[str]]
+
+
+def _as_list(v: LabelLike) -> List[str]:
+    return [v] if isinstance(v, str) else list(v)
+
+
+def _xpath_literal(s: str) -> str:
+    """XPath 1.0 没有转义引号的语法，字符串里同时有单双引号时用 concat() 拼。"""
+    if "'" not in s:
+        return f"'{s}'"
+    if '"' not in s:
+        return f'"{s}"'
+    parts = s.split("'")
+    return "concat(" + ", \"'\", ".join(f"'{p}'" for p in parts) + ")"
 
 
 class ElementUIAdapter:
@@ -23,19 +43,26 @@ class ElementUIAdapter:
         return page.locator(".el-table, .el-form-item, .el-input").count() > 0
 
     # ---------- 表单 ----------
-    def _form_item(self, page: Page, label: str) -> Locator:
+    def _form_item(self, page: Page, label: LabelLike) -> Locator:
         """
         Element 的 label 和控件是兄弟节点，没有 for/id 关联，
         所以要先定位到包含该 label 的 .el-form-item 容器再往下找控件。
         label 文本可能带冒号，用正则兼容。
 
+        label 可以传多个候选文案（多语言场景，比如「国家名称」和
+        "Country Name"）——拼成一个正则一次性找，命中哪个用哪个，不管当前
+        页面是什么语言。合并成一次 wait_for 而不是挨个候选轮流等，避免
+        候选越多、总等待时间越长（4 个语言候选不该等成 4 倍时间）。
+
         用 wait_for 而不是直接判 count()==0：count() 不会重试，用例一开始
         刚 goto 完，搜索表单可能还没渲染完，count() 立刻返回 0 就误判"找不到"，
         实际只是慢了一点。wait_for 会在超时前持续重试，页面快就立刻返回。
         """
-        pattern = re.compile(rf"^\s*{re.escape(label)}\s*[:：]?\s*$")
+        candidates = _as_list(label)
+        combined = re.compile("|".join(
+            rf"^\s*{re.escape(c)}\s*[:：]?\s*$" for c in candidates))
         item = page.locator(".el-form-item").filter(
-            has=page.locator(".el-form-item__label").filter(has_text=pattern)
+            has=page.locator(".el-form-item__label").filter(has_text=combined)
         )
         try:
             item.first.wait_for(state="attached", timeout=6000)
@@ -43,16 +70,19 @@ class ElementUIAdapter:
         except Exception:
             pass
         # 有些页面不用 el-form-item，退化成找 label 的父容器
+        xpath_or = " or ".join(
+            f"normalize-space()={_xpath_literal(c)}" for c in candidates)
         xitem = page.locator(
-            f"xpath=//*[contains(@class,'el-form-item')][.//label[normalize-space()='{label}']]"
+            f"xpath=//*[contains(@class,'el-form-item')][.//label[{xpath_or}]]"
         )
         try:
             xitem.first.wait_for(state="attached", timeout=3000)
             return xitem.first
         except Exception:
-            raise LookupError(f"找不到表单项: {label}")
+            shown = candidates[0] if len(candidates) == 1 else " / ".join(candidates)
+            raise LookupError(f"找不到表单项: {shown}")
 
-    def fill(self, page: Page, label: str, value: str) -> None:
+    def fill(self, page: Page, label: LabelLike, value: str) -> None:
         item = self._form_item(page, label)
         inp = item.locator("input.el-input__inner, textarea.el-textarea__inner").first
         inp.click()
@@ -60,12 +90,12 @@ class ElementUIAdapter:
         inp.type(str(value), delay=20)   # 有些页面监听 input 事件做联想，逐字符更稳
         page.keyboard.press("Escape")    # 关掉可能弹出的联想浮层
 
-    def get_input_value(self, page: Page, label: str) -> str:
+    def get_input_value(self, page: Page, label: LabelLike) -> str:
         item = self._form_item(page, label)
         return item.locator("input.el-input__inner").first.input_value()
 
     def select(
-        self, page: Page, label: str,
+        self, page: Page, label: LabelLike,
         option: Optional[str] = None, index: Optional[int] = None,
     ) -> str:
         """
@@ -89,7 +119,8 @@ class ElementUIAdapter:
         else:
             idx = index if index is not None else 0
             if options.count() <= idx:
-                raise LookupError(f"{label} 只有 {options.count()} 个选项，取不到第 {idx} 个")
+                shown = label if isinstance(label, str) else label[0]
+                raise LookupError(f"{shown} 只有 {options.count()} 个选项，取不到第 {idx} 个")
             target = options.nth(idx)
 
         text = target.inner_text().strip()
@@ -97,7 +128,7 @@ class ElementUIAdapter:
         page.wait_for_timeout(200)
         return text
 
-    def list_options(self, page: Page, label: str) -> List[str]:
+    def list_options(self, page: Page, label: LabelLike) -> List[str]:
         """枚举下拉的所有选项，用于遍历筛选测试"""
         item = self._form_item(page, label)
         item.locator(".el-select, .el-input").first.click(timeout=5000)
@@ -107,7 +138,7 @@ class ElementUIAdapter:
         page.keyboard.press("Escape")
         return [o.strip() for o in opts]
 
-    def date_range(self, page: Page, label: str, start: str, end: str) -> None:
+    def date_range(self, page: Page, label: LabelLike, start: str, end: str) -> None:
         """
         el-date-picker 的范围选择是一个容器里两个 input。
         直接 fill 再按 Enter 比点日历面板可靠得多。
@@ -201,36 +232,51 @@ class ElementUIAdapter:
         tbl = page.locator(table).first
         return tbl.locator(".el-table__empty-block").is_visible()
 
-    def column_index(self, page: Page, column: str, table: str = ".el-table") -> int:
+    def column_index(self, page: Page, column: LabelLike, table: str = ".el-table") -> int:
+        candidates = _as_list(column)
         hs = self.headers(page, table)
-        if column not in hs:
-            raise LookupError(f"表头没有列 '{column}'，实际表头: {hs}")
-        return hs.index(column)
+        for cand in candidates:
+            if cand in hs:
+                return hs.index(cand)
+        shown = candidates[0] if len(candidates) == 1 else " / ".join(candidates)
+        raise LookupError(f"表头没有列 '{shown}'，实际表头: {hs}")
 
-    def column_values(self, page: Page, column: str, table: str = ".el-table") -> List[str]:
+    def column_values(self, page: Page, column: LabelLike, table: str = ".el-table") -> List[str]:
+        candidates = _as_list(column)
         data = self._read(page, table)
-        headers = [t for t in data["headers"] if t]
-        if column not in headers:
-            raise LookupError(f"表头没有列 '{column}'，实际表头: {headers}")
-        # 空表头列会被过滤，导致过滤后的下标与 td 下标错位；用原始表头定位真实列位置
-        idx = data["headers"].index(column)
-        return [cells[idx] if idx < len(cells) else "" for cells in data["rows"]]
+        headers = data["headers"]
+        for cand in candidates:
+            if cand in headers:
+                idx = headers.index(cand)
+                return [cells[idx] if idx < len(cells) else "" for cells in data["rows"]]
+        shown = candidates[0] if len(candidates) == 1 else " / ".join(candidates)
+        raise LookupError(f"表头没有列 '{shown}'，实际表头: {[t for t in headers if t]}")
 
-    def table_data(self, page: Page, table: str = ".el-table") -> List[dict]:
-        """整张表抓成 list[dict]，用于和导出文件比对。一次 evaluate 读完。"""
+    def table_data(self, page: Page, table: str = ".el-table",
+                   header_variants: Optional[Dict[str, Dict[str, str]]] = None) -> List[dict]:
+        """
+        整张表抓成 list[dict]，用于和导出文件比对。一次 evaluate 读完。
+
+        给了 header_variants 就把原始表头翻译回 canonical 列名再当 key——
+        调用方（导出比对、渲染检查、CRUD 按列定位记录）永远按扫描时的
+        canonical 名字取值，不用关心页面当前渲染的是哪种语言。
+        """
         data = self._read(page, table)
         raw_headers = data["headers"]
+        canon_of = _reverse_variant_map(header_variants) if header_variants else {}
         out = []
         for cells in data["rows"]:
             row = {}
             for j, h in enumerate(raw_headers):
                 if h:  # 跳过复选框/展开等空表头列，但下标 j 仍对齐 td
-                    row[h] = cells[j] if j < len(cells) else ""
+                    key = canon_of.get(h, h)
+                    row[key] = cells[j] if j < len(cells) else ""
             out.append(row)
         return out
 
     def find_row_by(self, page: Page, column: str, value: str,
-                    table: str = ".el-table") -> int:
+                    table: str = ".el-table",
+                    header_variants: Optional[Dict[str, Dict[str, str]]] = None) -> int:
         """
         按某列的值定位行号，CRUD 闭环验证用它找到"自己刚建的那条记录"。
         用 contains 而不是精确相等——列宽不够时页面会截断显示（"用户Bcl..."），
@@ -238,7 +284,7 @@ class ElementUIAdapter:
         找不到、或者匹配上不止一行（说明搜索条件不够精确）都报错，
         不能瞎猜一行就去改/删——那可能是别人的真实数据。
         """
-        rows = self.table_data(page, table)
+        rows = self.table_data(page, table, header_variants=header_variants)
         hits = [i for i, r in enumerate(rows) if value in str(r.get(column, ""))]
         if not hits:
             raise LookupError(f"列 '{column}' 里没有找到包含 '{value}' 的行，"
@@ -359,13 +405,20 @@ class ElementUIAdapter:
                 pass
         raise LookupError(f"第 {row + 1} 行找不到「{action}」操作")
 
-    def dialog_field_values(self, page: Page) -> Dict[str, str]:
+    def dialog_field_values(self, page: Page,
+                            header_variants: Optional[Dict[str, Dict[str, str]]] = None
+                            ) -> Dict[str, str]:
         """
         读弹窗里每个表单项当前的值，用于验证编辑回显。
         input 取 value，下拉也是渲染成 input 的，所以统一读 input；
         读不到就退回读文本（radio/switch 这类）。
+
+        给了 header_variants 就把读到的 label 翻译回 canonical 名字——
+        CRUD 验证里这里读出来的值要跟 table_data() 的 canonical key 对比，
+        两边不翻译成同一套名字，语言一切换比对就全错位。
         """
         dlg = self.dialog(page)
+        canon_of = _reverse_variant_map(header_variants) if header_variants else {}
         out: Dict[str, str] = {}
         items = dlg.locator(".el-form-item")
         for i in range(items.count()):
@@ -391,15 +444,19 @@ class ElementUIAdapter:
                         val = re.sub(r"\s+", " ", content.inner_text()).strip()
                 except Exception:
                     pass
-            out[label] = val
+            out[canon_of.get(label, label)] = val
         return out
 
-    def detail_values(self, page: Page) -> Dict[str, str]:
+    def detail_values(self, page: Page,
+                      header_variants: Optional[Dict[str, Dict[str, str]]] = None
+                      ) -> Dict[str, str]:
         """
         读详情弹窗的「字段：值」。详情不一定用 el-form-item 渲染（常见是
         el-descriptions，或者干脆一堆 div），所以按「冒号分隔」兜底解析文本。
+        header_variants 的作用同 dialog_field_values。
         """
         dlg = self.dialog(page)
+        canon_of = _reverse_variant_map(header_variants) if header_variants else {}
         out: Dict[str, str] = {}
 
         # 1. el-descriptions 这类结构化的，直接按 label/content 配对
@@ -410,7 +467,8 @@ class ElementUIAdapter:
                 k = it.locator(".el-descriptions-item__label").first.inner_text().strip()
                 v = it.locator(".el-descriptions-item__content").first.inner_text().strip()
                 if k:
-                    out[k.rstrip(":：").strip()] = v
+                    k = k.rstrip(":：").strip()
+                    out[canon_of.get(k, k)] = v
             except Exception:
                 continue
         if out:
@@ -427,15 +485,18 @@ class ElementUIAdapter:
             if m:
                 k, v = m.group(1).strip(), m.group(2).strip()
                 if k:
-                    out[k] = v
+                    out[canon_of.get(k, k)] = v
         return out
 
-    def form_error_labels(self, page: Page) -> List[str]:
+    def form_error_labels(self, page: Page,
+                          header_variants: Optional[Dict[str, Dict[str, str]]] = None
+                          ) -> List[str]:
         """
         当前弹窗里哪些表单项报了校验错误（用于必填校验断言）。
-        返回报错项的 label 列表。
+        返回报错项的 label 列表（翻译回 canonical 名字，理由同上）。
         """
         dlg = self.dialog(page)
+        canon_of = _reverse_variant_map(header_variants) if header_variants else {}
         out = []
         items = dlg.locator(".el-form-item.is-error")
         for i in range(items.count()):
@@ -443,7 +504,7 @@ class ElementUIAdapter:
                 lb = items.nth(i).locator(".el-form-item__label").first.inner_text()
                 lb = lb.strip().rstrip(":：").strip().lstrip("*").strip()
                 if lb:
-                    out.append(lb)
+                    out.append(canon_of.get(lb, lb))
             except Exception:
                 continue
         return out

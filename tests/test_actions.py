@@ -35,6 +35,9 @@ class FakeCtx:
         self.page = None
         self.vars = {}
 
+    def table_data(self):
+        return self.ui.table_data(self.page)
+
 
 class RenderGarbageTests(unittest.TestCase):
     def test_clean_table_passes(self):
@@ -114,6 +117,9 @@ class FakeSearchCtx:
 
     def selector(self, key):
         return "button:has-text('搜索')"
+
+    def label_of(self, label):
+        return [label]
 
 
 class CheckSelectOptionsTests(unittest.TestCase):

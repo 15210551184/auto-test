@@ -65,25 +65,26 @@
 
 | 模块 | 行数 | 职责 |
 |---|---:|---|
-| `engine/actions.py` | 963 | 动作与断言注册表，39 个可用动作（含第二期 CRUD 闭环、多语言检查） |
-| `web/index.html` | 729 | Web 控制台前端 |
-| `engine/scanner.py` | 649 | 打开页面识别结构 + 表单 Schema，生成配置草稿 |
-| `server.py` | 644 | Web 控制台后端 |
-| `engine/adapters/element_ui.py` | 527 | Element UI 控件操作封装 |
+| `engine/actions.py` | 965 | 动作与断言注册表，39 个可用动作（含第二期 CRUD 闭环、多语言检查，全部通过 `ctx.label_of`/`ctx.column_of` 等做多语言解析） |
+| `engine/scanner.py` | 813 | 打开页面识别结构 + 表单 Schema，生成配置草稿；配了 `languages` 会自动扫描合并 `label_variants`/`header_variants` |
+| `web/index.html` | 760 | Web 控制台前端 |
+| `server.py` | 654 | Web 控制台后端 |
+| `engine/adapters/element_ui.py` | 588 | Element UI 控件操作封装，label/column 支持多语言候选文案列表 |
 | `engine/crawler.py` | 468 | 菜单爬取 |
-| `engine/explain.py` | 379 | 把 YAML 用例翻译成人话，供不看代码的人核对 |
-| `engine/runner.py` | 302 | 执行编排、上下文、用例隔离、WARN 分级 |
+| `engine/explain.py` | 380 | 把 YAML 用例翻译成人话，供不看代码的人核对 |
+| `engine/runner.py` | 373 | 执行编排、上下文、用例隔离、WARN 分级、`target_language` 执行时切语言 |
 | `engine/login.py` | 291 | UI 自动登录、懒登录、验证码检测 |
-| `engine/batch.py` | 271 | 批量扫描/执行，并发跑多个页面 |
-| `cli.py` | 224 | 命令行入口 |
+| `engine/batch.py` | 273 | 批量扫描/执行，并发跑多个页面 |
+| `cli.py` | 231 | 命令行入口 |
 | `engine/project.py` | 195 | 项目（登录信息、语言配置 + 菜单地图）管理 |
 | `engine/export_verify.py` | 185 | 导出下载与 Excel 比对 |
 | `engine/normalize.py` | 141 | 值归一化与比较 |
 | `engine/datafactory.py` | 138 | 测试数据工厂：按字段类型生成合法值 |
 | `engine/report.py` | 112 | HTML / JSON 报告 |
-| `engine/models.py` | 90 | 数据结构定义（含 Status.WARN） |
+| `engine/models.py` | 96 | 数据结构定义（含 Status.WARN、`label_variants`/`header_variants`） |
 | `engine/state.py` | 50 | 登录态文件的安全读写 |
 | `engine/i18n_terms.py` | 39 | 按钮/菜单关键词的中英文对照表 |
+| `engine/lang_variants.py` | 38 | 表单 label / 表头列名的多语言文案查找表（candidates / reverse_map） |
 | `engine/browser.py` | 36 | 统一的 Chromium 启动参数 |
 | `engine/progress.py` | 25 | 结构化执行进度上报 |
 | `engine/tz.py` | 25 | 统一北京时间 |
@@ -573,9 +574,49 @@ upload 再判 input，不然上传字段会被当成文本框，自动填表时�
 按钮"名单判断"这个别真点下去"，之前只有中文关键词，切到英文界面后
 `Delete` 认不出来会被真的点下去——是安全问题，不只是功能缺失。新增
 `engine/i18n_terms.py` 统一维护中英文对照表，`DESTRUCTIVE` 名单、菜单
-跳过词、按钮探测这几处都从这里取词，不再各写各的。（表单 label、表头
-列名这类"文本即语义"的部分，做真正的跨语言健壮匹配需要按 DOM 位置多语言
-扫描合并，工作量大，暂未做，见第十节。）
+跳过词、按钮探测这几处都从这里取词，不再各写各的。
+
+**健壮性——表单 label / 表头列名的深度多语言匹配**：按钮关键词是固定的
+有限集合，能写死词表；但表单字段名、表格列名是每个页面自己的业务文案，
+没法预先枚举，得从页面自己扫出来。核心设计是"canonical 名字 + 译文
+查找表"：
+
+```yaml
+# 扫描自动生成，canonical 就是默认语言下扫到的原始文案，
+# 所有 case YAML 里 label/column 参数继续用这个文案，不用改
+label_variants:
+  国家名称: {en: "Country Name", fr: "Nom du pays"}
+header_variants:
+  状态: {en: Status}
+```
+
+`engine/lang_variants.py` 提供两个方向的查询：`candidates()` 把
+canonical 展开成"所有已知文案"给 Playwright 定位元素用（哪个语言不用
+关心，命中哪个用哪个）；`reverse_map()` 把任意已知文案（不管当前渲染的
+是哪种语言）翻译回 canonical，给断言按统一 key 取值用。`Context` 在这
+之上包了一层 `label_of()`/`column_of()`/`table_data()`/`find_row_by()`/
+`canonical_headers()`/`dialog_field_values()`/`detail_values()`/
+`form_error_labels()`，`actions.py` 里所有碰表单 label、表头列名的动作
+（`fill`/`select`/`check_select_options`/`assert_column_*`/CRUD 闭环
+等）统一通过这层解析，不直接传裸字符串给适配器——这样切换语言不需要
+改任何一条已有用例。
+
+`label_variants`/`header_variants` 由扫描器自动生成，不用手写：
+`scanner.scan()` 配了项目级 `languages` 之后，会在默认语言扫完之后，
+依次切到每种配置语言，重新扫一遍搜索表单 label / 表格表头 / 新增弹窗
+字段 label（只取文案，不重复探测类型/选项，避免副作用），按 DOM 位置
+和默认语言那次的结果对齐——位置数量对不上就整批跳过，宁可缺失也不
+错配（`_merge_positional`）。
+
+**执行时选语言**：`run_page`/`batch.run_selected` 新增 `target_language`
+参数，选了之后每条用例重新导航到页面后、跑自己的步骤之前，会先用
+`switch_language` 切到这门语言（每条用例都要切一次，因为大多数系统的
+语言状态挂在前端内存/localStorage，每次 goto 都会被冲掉）。CLI 用
+`--lang <code>`，Web 控制台在"只执行勾选的类别"上方新增"执行语言"
+下拉（项目没配 `languages` 就不显示），先选语言再勾类别，跟"多语言
+检查"（4.7 翻译正确性那条，遍历所有语言各查一次）是两件独立的事：
+前者验证"切到这门语言后，其它功能是否还正常"，后者验证"翻译本身对
+不对"。
 
 **翻译正确性——新的一类断言，不需要懂业务**：
 
@@ -771,7 +812,8 @@ python server.py
 
 **已完成**（原计划里的，不再重复排期）：配置编辑器（YAML 编辑 + 「查看说明」
 人话预览，含项目级设置编辑）、批量执行（含并发）、控制台鉴权（fail-closed +
-限流）、多语言按钮关键词健壮性 + 翻译正确性检查（见 4.7）。
+限流）、多语言按钮关键词健壮性 + 翻译正确性检查 + 表单 label/表头列名的
+深度多语言匹配（扫描自动合并 + 执行时选语言，见 4.7）。
 
 按投入产出比排序，剩下的：
 
@@ -780,15 +822,11 @@ python server.py
 2. **跨页面场景层**：新的一层 YAML（场景），串联多个页面的用例、页面间
    传变量——比如"国家管理新增一个国家，加盟商管理的国家下拉能选到它"。
    见设计讨论：这是新增的一层，不是对现有页面配置的改造
-3. **多语言深度健壮性**：4.7 节只解决了按钮关键词，表单 label / 表头列名
-   这类"文本即语义"的匹配还是单语言的——完整方案是同一页面按每种配置的
-   语言各扫一次，按 DOM 位置合并出"一个字段的多语言文案"，执行时挨个试
-   哪个命中用哪个。工作量接近一次扫描器改造，值得单独排期
-4. **权限维度**：模型标注 `roles`，配多账号后同一套用例换账号跑，验证
+3. **权限维度**：模型标注 `roles`，配多账号后同一套用例换账号跑，验证
    "该看到的看到、不该操作的操作不了"
-5. **趋势对比**：同一配置多次执行的通过率曲线，能看出是偶发还是持续失败
-6. **定时任务纳入界面**：现在还是 crontab，可以做成页面上配置
-7. **Ant Design 完整适配器**：`scanner.scan_table()` 已经能兼容识别 Ant
+4. **趋势对比**：同一配置多次执行的通过率曲线，能看出是偶发还是持续失败
+5. **定时任务纳入界面**：现在还是 crontab，可以做成页面上配置
+6. **Ant Design 完整适配器**：`scanner.scan_table()` 已经能兼容识别 Ant
    Design 的表格，但表单扫描（`scan_form_schema`）、运行期适配器
    （`element_ui.py`）都还是 Element UI 专用，要支持 Ant Design 系统
    得照 `ElementUIAdapter` 的接口再写一个
@@ -817,6 +855,8 @@ autotest/
 │   ├── normalize.py               值归一化
 │   ├── export_verify.py           导出校验
 │   ├── report.py                  报告生成
+│   ├── i18n_terms.py              按钮关键词中英文对照表
+│   ├── lang_variants.py           表单 label / 表头列名多语言文案查找表
 │   └── adapters/
 │       └── element_ui.py          Element UI 适配
 └── web/

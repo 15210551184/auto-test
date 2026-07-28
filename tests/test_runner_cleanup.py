@@ -46,6 +46,7 @@ class FakeCtx:
         self.page = FakePage()
         self.config = FakeConfig()
         self.ui = FakeUI()
+        self.target_language = None
         self.vars = {"created_identity": None, "created_identity_column": None}
         self.console_errors = []
         self.failed_requests = []
