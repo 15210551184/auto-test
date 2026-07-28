@@ -50,9 +50,10 @@ header .sep{color:var(--line)}
 /* 菜单树 / 运行日志 标题可以点开放大到整屏——分屏之后单块空间还是不够看的
    时候（比如菜单很多层、或者要盯着长长的日志看），点一下标题临时占满，
    点空白处收回去，不用改布局比例也能应付"这块内容我现在需要更大空间"。 */
-.card-title{cursor:pointer;user-select:none}
-.card-title:hover{color:var(--ink)}
-.maximize-hint{font-size:11px;margin-left:3px;opacity:.55}
+.icon-btn{padding:4px 9px;font-size:16px;line-height:1;color:var(--ink-2)}
+.icon-btn:hover:not(:disabled){color:var(--busy);background:#f5f7fa}
+.term-head .icon-btn{background:transparent;border-color:#333c48;color:#9aa6b5}
+.term-head .icon-btn:hover:not(:disabled){background:#1c222b;color:#fff}
 #maximizeBackdrop{position:fixed;inset:0;background:rgba(18,22,28,.4);z-index:34;display:none}
 #maximizeBackdrop.show{display:block}
 .card.maximized{position:fixed;top:70px;left:20px;right:20px;bottom:20px;z-index:35;
@@ -234,8 +235,9 @@ a.open:hover{text-decoration:underline}
 <div class="wrap">
   <div class="col-left">
     <div class="card">
-      <h2><span class="card-title" id="treeTitle" title="点击放大到整屏，点空白处缩回">测试哪些菜单<span class="maximize-hint">⤢</span></span> <span class="count" id="pageCount"></span>
-        <button class="link sm" type="button" id="btnFoldAll" style="margin-left:auto">全部收起</button></h2>
+      <h2>测试哪些菜单 <span class="count" id="pageCount"></span>
+        <button class="link sm" type="button" id="btnFoldAll" style="margin-left:auto">全部收起</button>
+        <button class="icon-btn" type="button" id="btnMaxTree" title="放大到整屏">⤢</button></h2>
       <div class="selbar" id="selBar" style="display:none">
         <span id="selInfo"></span>
         <div class="right">
@@ -251,8 +253,9 @@ a.open:hover{text-decoration:underline}
     </div>
     <div class="card term-card">
       <h2><div class="term-head">
-        <span class="card-title" id="termTitle" title="点击放大到整屏，点空白处缩回">运行日志<span class="maximize-hint">⤢</span></span><span class="job" id="jobName"></span>
+        <span>运行日志</span><span class="job" id="jobName"></span>
         <span class="elapsed" id="elapsed"></span>
+        <button class="icon-btn" type="button" id="btnMaxTerm" title="放大到整屏">⤢</button>
       </div></h2>
       <div class="term-prog" id="termProg" style="display:none">
         <div class="tp-text"><span id="tpLabel"></span><span id="tpCount"></span></div>
@@ -419,18 +422,24 @@ function updateExecOptsBadge(){
   if(tags.length) bits.push(tags.length+' 类');
   $('#execOptsBadge').textContent=bits.length?'（'+bits.join(' · ')+'）':'';
 }
+function _setMaxBtn(card,on){
+  const btn=card.querySelector('.icon-btn');
+  if(!btn) return;
+  btn.textContent=on?'⤡':'⤢';
+  btn.title=on?'收回':'放大到整屏';
+}
 function setMaximized(card){
   const already=card.classList.contains('maximized');
-  document.querySelectorAll('.card.maximized').forEach(c=>c.classList.remove('maximized'));
-  if(!already) card.classList.add('maximized');
+  document.querySelectorAll('.card.maximized').forEach(c=>{c.classList.remove('maximized');_setMaxBtn(c,false);});
+  if(!already){card.classList.add('maximized');_setMaxBtn(card,true);}
   $('#maximizeBackdrop').classList.toggle('show', !already);
 }
 function closeMaximized(){
-  document.querySelectorAll('.card.maximized').forEach(c=>c.classList.remove('maximized'));
+  document.querySelectorAll('.card.maximized').forEach(c=>{c.classList.remove('maximized');_setMaxBtn(c,false);});
   $('#maximizeBackdrop').classList.remove('show');
 }
-$('#treeTitle').onclick=()=>setMaximized($('#treeTitle').closest('.card'));
-$('#termTitle').onclick=()=>setMaximized($('#termTitle').closest('.card'));
+$('#btnMaxTree').onclick=()=>setMaximized($('#btnMaxTree').closest('.card'));
+$('#btnMaxTerm').onclick=()=>setMaximized($('#btnMaxTerm').closest('.card'));
 $('#maximizeBackdrop').onclick=closeMaximized;
 document.addEventListener('keydown',e=>{if(e.key==='Escape')closeMaximized();});
 $('#projSel').onchange = loadProject;
