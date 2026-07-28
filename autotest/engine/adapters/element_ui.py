@@ -10,6 +10,8 @@ from typing import Any, Dict, List, Optional
 
 from playwright.sync_api import Page, Locator
 
+from ..i18n_terms import words as _i18n_words
+
 
 class ElementUIAdapter:
     name = "element-ui"
@@ -455,9 +457,14 @@ class ElementUIAdapter:
             return []
 
     # ---------- 按钮巡检 ----------
-    # 破坏性操作的关键词，巡检时只确认"存在且可点"，绝不真的点下去
-    DESTRUCTIVE = ["删除", "移除", "停用", "禁用", "作废", "清空", "注销", "解绑",
-                   "设为失效", "失效", "撤销", "驳回", "重置密码"]
+    # 破坏性操作的关键词，巡检时只确认"存在且可点"，绝不真的点下去。
+    # 中英文都要覆盖——纯中文名单在英文界面下识别不出 "Delete"，
+    # 会导致巡检真的把危险按钮点下去，这是安全问题不是功能缺失。
+    DESTRUCTIVE = _i18n_words("delete", "disable") + [
+        "作废", "Void", "清空", "Clear", "注销", "Unregister",
+        "解绑", "Unbind", "撤销", "Revoke", "驳回", "Reject",
+        "重置密码", "Reset Password",
+    ]
 
     def toolbar_button_texts(self, page: Page) -> List[str]:
         """

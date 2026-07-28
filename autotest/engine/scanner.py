@@ -18,6 +18,7 @@ import yaml
 from playwright.sync_api import sync_playwright, Page
 from . import browser as B
 from .adapters.element_ui import ElementUIAdapter
+from .i18n_terms import words as _i18n_words
 from .state import valid_storage_state
 
 
@@ -315,15 +316,15 @@ class PageScanner:
             return any(self.page.locator(
                 f"button:has-text('{w}'), a:has-text('{w}')").count() > 0 for w in words)
         return {
-            "search": has("搜索", "查询"),
-            "reset": has("重置", "清空"),
-            "export": has("导出", "下载"),
-            "create": has("新增", "添加", "创建"),
-            "edit": has("编辑", "修改"),
-            "delete": has("删除"),
-            "detail": has("查看", "详情"),
-            "status_toggle": has("设为失效", "设为生效", "停用", "启用", "禁用", "冻结", "解冻"),
-            "batch": has("批量"),
+            "search": has(*_i18n_words("search")),
+            "reset": has(*_i18n_words("reset")),
+            "export": has(*_i18n_words("export")),
+            "create": has(*_i18n_words("create")),
+            "edit": has(*_i18n_words("edit")),
+            "delete": has(*_i18n_words("delete")),
+            "detail": has(*_i18n_words("detail")),
+            "status_toggle": has(*_i18n_words("disable", "enable")),
+            "batch": has(*_i18n_words("batch")),
         }
 
     def scan_pagination(self) -> Dict[str, Any]:

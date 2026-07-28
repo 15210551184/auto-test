@@ -9,6 +9,7 @@ from typing import Any, Callable, Dict, List
 
 from . import datafactory as DF
 from . import normalize as N
+from .i18n_terms import words as _i18n_words
 
 REGISTRY: Dict[str, Callable] = {}
 
@@ -155,7 +156,7 @@ def do_check_buttons(ctx, skip: list = None, max_buttons: int = 20, **kw):
     避免重复触发下载等副作用。
     """
     page, ui = ctx.page, ctx.ui
-    always_skip = {"导出", "下载", "搜索", "查询", "重置", "清空", "刷新"}
+    always_skip = set(_i18n_words("export", "search", "reset", "refresh"))
     user_skip = set(skip or [])
     texts = ui.toolbar_button_texts(page)
     if not texts:

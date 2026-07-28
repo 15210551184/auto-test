@@ -21,6 +21,7 @@ from playwright.sync_api import Page, sync_playwright
 
 from . import browser as B
 from . import progress
+from .i18n_terms import words as _i18n_words
 from .login import ensure_logged_in, is_login_page
 from .state import save_storage_state, valid_storage_state
 
@@ -47,7 +48,9 @@ SUBMENU_SELECTORS = [
 ]
 
 # 这些菜单跳过：要么是危险操作，要么不是数据列表页
-SKIP_KEYWORDS = ["退出", "登出", "注销", "logout", "个人中心", "修改密码", "帮助"]
+SKIP_KEYWORDS = _i18n_words("logout") + [
+    "个人中心", "修改密码", "帮助", "Profile", "Change Password", "Help",
+]
 
 
 def _text(loc) -> str:
@@ -421,12 +424,12 @@ def _probe_page(page: Page) -> Dict:
         "has_table": has_table,
         "columns": cols,
         "rows": rows,
-        "has_search": has_btn("搜索", "查询"),
-        "has_export": has_btn("导出", "下载"),
-        "has_create": has_btn("新增", "添加", "创建"),
-        "has_edit": has_btn("编辑", "修改"),
-        "has_delete": has_btn("删除"),
-        "has_batch": has_btn("批量"),
+        "has_search": has_btn(*_i18n_words("search")),
+        "has_export": has_btn(*_i18n_words("export")),
+        "has_create": has_btn(*_i18n_words("create")),
+        "has_edit": has_btn(*_i18n_words("edit")),
+        "has_delete": has_btn(*_i18n_words("delete")),
+        "has_batch": has_btn(*_i18n_words("batch")),
         # 有表格 + 有搜索 = 典型的数据列表页，最值得测
         "recommended": bool(has_table and cols >= 2),
     }
