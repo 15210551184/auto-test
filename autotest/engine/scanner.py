@@ -521,12 +521,21 @@ class PageScanner:
             before = set(self.page.evaluate(self._VISIBLE_LEAF_TEXTS_JS))
         except Exception:
             before = set()
+        loc = self.page.locator(switcher_trigger).first
         try:
-            self.page.locator(switcher_trigger).first.click(timeout=5000)
-        except Exception as e:
-            raise LookupError(
-                f"选择器 '{switcher_trigger}' 点不到任何元素（等了 5s）：{type(e).__name__}"
-            ) from e
+            loc.click(timeout=4000)
+        except Exception:
+            # 有些自定义下拉触发器（比如 Element UI 的 el-dropdown 自定义内容）
+            # 通不过 Playwright 的可操作性检查（元素被判定为"暂不稳定"/"被遮挡"），
+            # 但实际上是可以点的——force 绕过这些检查直接在元素中心派发点击事件，
+            # 兜底试一次再彻底放弃。
+            try:
+                loc.click(timeout=2000, force=True)
+            except Exception as e:
+                raise LookupError(
+                    f"选择器 '{switcher_trigger}' 点不到任何元素（普通点击和 force "
+                    f"点击都失败）：{type(e).__name__}。当前页面: {self.page.url}"
+                ) from e
         self.page.wait_for_timeout(500)
         try:
             after = self.page.evaluate(self._VISIBLE_LEAF_TEXTS_JS)

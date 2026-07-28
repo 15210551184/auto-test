@@ -184,16 +184,21 @@ class ToConfigPropagatesVariantsTests(unittest.TestCase):
 
 
 class FakeMenuLocator:
-    """极简 locator 桩：click 记调用，能配置成点击失败。"""
+    """极简 locator 桩：click 记调用，能配置成普通点击/force 点击各自失败。"""
 
-    def __init__(self, raise_on_click=False):
+    def __init__(self, raise_on_click=False, raise_on_force_click=False):
         self._raise_on_click = raise_on_click
+        self._raise_on_force_click = raise_on_force_click
 
     @property
     def first(self):
         return self
 
-    def click(self, timeout=None):
+    def click(self, timeout=None, force=False):
+        if force:
+            if self._raise_on_force_click:
+                raise TimeoutError("locator.click: Timeout exceeded (force)")
+            return
         if self._raise_on_click:
             raise TimeoutError("locator.click: Timeout exceeded")
 
@@ -204,16 +209,19 @@ class FakeMenuPage:
     "当前可见文本"快照，第二次是点击后的快照，探测逻辑对这两次快照做差集。
     """
 
-    def __init__(self, snapshots, raise_on_trigger_click=False):
+    def __init__(self, snapshots, raise_on_trigger_click=False, raise_on_force_click=False):
         self._snapshots = list(snapshots)
         self._raise_on_trigger_click = raise_on_trigger_click
+        self._raise_on_force_click = raise_on_force_click
         self.keyboard = types.SimpleNamespace(press=lambda k: None)
+        self.url = "http://x.test/web/index"
 
     def on(self, *a, **kw):
         pass
 
     def locator(self, sel):
-        return FakeMenuLocator(raise_on_click=self._raise_on_trigger_click)
+        return FakeMenuLocator(raise_on_click=self._raise_on_trigger_click,
+                               raise_on_force_click=self._raise_on_force_click)
 
     def wait_for_timeout(self, ms):
         pass
@@ -238,12 +246,24 @@ class ProbeLanguageOptionsTests(unittest.TestCase):
         self.assertEqual(["中文", "English"], texts)
 
     def test_trigger_click_failure_raises_lookup_error(self):
-        # 选择器写错、点不到任何元素——跟"点开了但没冒出新文字"是两种不同的
-        # 失败原因，前者得报出来让人去改选择器，不能也悄悄返回空列表。
-        page = FakeMenuPage([[]], raise_on_trigger_click=True)
+        # 选择器写错、普通点击和 force 点击都点不到——这跟"点开了但没冒出
+        # 新文字"是两种不同的失败原因，前者得报出来让人去改选择器，
+        # 不能也悄悄返回空列表。
+        page = FakeMenuPage([[]], raise_on_trigger_click=True, raise_on_force_click=True)
         sc = PageScanner(page)
         with self.assertRaises(LookupError):
             sc.probe_language_options(".lang-switch")
+
+    def test_force_click_fallback_succeeds_when_normal_click_fails(self):
+        # el-dropdown 这类自定义触发器常年过不了 Playwright 的可操作性检查，
+        # 但其实是能点的——普通点击失败后应该自动退回 force 点击再试一次。
+        before = ["搜索"]
+        after = ["搜索", "中文", "English"]
+        page = FakeMenuPage([before, after], raise_on_trigger_click=True,
+                            raise_on_force_click=False)
+        sc = PageScanner(page)
+        texts = sc.probe_language_options(".lang-select")
+        self.assertEqual(["中文", "English"], texts)
 
     def test_nothing_new_appeared_returns_empty(self):
         same = ["搜索", "重置"]
