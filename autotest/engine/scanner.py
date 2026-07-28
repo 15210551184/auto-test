@@ -19,7 +19,8 @@ from playwright.sync_api import sync_playwright, Page
 from . import browser as B
 from .adapters.element_ui import ElementUIAdapter
 from .i18n_terms import words as _i18n_words
-from .state import valid_storage_state
+from .login import ensure_logged_in
+from .state import save_storage_state, valid_storage_state
 
 
 class PageScanner:
@@ -555,11 +556,17 @@ class PageScanner:
 
 
 def probe_languages(url: str, switcher_trigger: str, storage_state: Optional[str] = None,
-                    headless: bool = True) -> List[str]:
+                    headless: bool = True, login: Optional[Dict[str, Any]] = None) -> List[str]:
     """
     打开页面、点语言切换控件，把弹出菜单里的候选文案读出来。给项目设置
     「探测语言选项」用，省去手动 F12 一个个抄文案这一步；抄错一个字，
     switch_language 就永远找不到那个菜单项，是个隐蔽但常见的坑。
+
+    传了 login 就走懒登录（cookie 还有效就直接用，过期了才真正登录一次并
+    把新 cookie 存回去）——这个函数本来只是"点一下语言菜单"，之前图省事
+    直接 page.goto() 完事，没走懒登录；结果 cookie 一过期，自动化会话
+    悄悄停在登录页，语言切换控件根本不在登录页上，点什么都点不到，
+    报错看着像"选择器写错了"，其实是登录过期，两种情况完全分不清。
     """
     with sync_playwright() as pw:
         browser = B.launch(pw, headless=headless)
@@ -570,7 +577,12 @@ def probe_languages(url: str, switcher_trigger: str, storage_state: Optional[str
         bctx = browser.new_context(**args)
         page = bctx.new_page()
         sc = PageScanner(page)
-        page.goto(url, wait_until="domcontentloaded", timeout=60000)
+        if login:
+            did = ensure_logged_in(page, url, login)
+            if did and storage_state:
+                save_storage_state(bctx, storage_state)
+        else:
+            page.goto(url, wait_until="domcontentloaded", timeout=60000)
         page.wait_for_timeout(2000)
         texts = sc.probe_language_options(switcher_trigger)
         browser.close()

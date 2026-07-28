@@ -20,7 +20,7 @@ from engine import scanner
 from engine import batch, project as P
 from engine import tz
 from engine.crawler import discover
-from engine.login import load_dotenv
+from engine.login import LoginError, load_dotenv
 from engine.runner import load_config, run_page, save_login_state
 from engine.state import save_storage_state, valid_storage_state
 
@@ -161,7 +161,11 @@ def cmd_probe_lang(a):
         print("项目没有配置 home_url"); sys.exit(1)
     print(f"探测语言选项：{home}  trigger={a.trigger}")
     try:
-        texts = scanner.probe_languages(home, a.trigger, storage_state=a.state, headless=True)
+        texts = scanner.probe_languages(home, a.trigger, storage_state=a.state, headless=True,
+                                        login=proj.get("login"))
+    except LoginError as e:
+        print(f"✗ 登录失败，没法探测：{e}")
+        return
     except LookupError as e:
         print(f"✗ {e}")
         print("选择器写错了或者页面上根本没有这个元素——F12 打开开发者工具，用左上角的"
