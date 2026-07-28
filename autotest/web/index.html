@@ -68,6 +68,21 @@ button.danger:hover:not(:disabled){background:#fdeced}
 .tf-list label{display:flex;align-items:center;gap:5px;font-size:12.5px;
   color:var(--ink);cursor:pointer;margin:0}
 .tf-list input{width:14px;height:14px;accent-color:var(--busy);cursor:pointer}
+.step+.step{margin-top:16px;border-top:1px solid #f0f2f5;padding-top:16px}
+.step-h{font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;
+  color:var(--ink-3);margin-bottom:9px}
+.step .hint{margin-bottom:0}
+details.exec-opts{margin-top:10px;border:1px solid var(--line);border-radius:5px;background:#fafbfc}
+details.exec-opts>summary{list-style:none;cursor:pointer;padding:9px 11px;font-size:12.5px;
+  color:var(--ink-2);display:flex;align-items:center;gap:6px;user-select:none}
+details.exec-opts>summary::-webkit-details-marker{display:none}
+details.exec-opts>summary::before{content:'▸';color:var(--ink-3);font-size:11px;transition:transform .12s}
+details.exec-opts[open]>summary::before{transform:rotate(90deg)}
+details.exec-opts[open]>summary{border-bottom:1px solid var(--line)}
+#execOptsBadge{color:var(--busy);font-weight:500}
+.exec-opts-body{padding:11px}
+.exec-opts-body .tag-filter{border:none;padding:0;background:none}
+.exec-opts-body .tag-filter+.tag-filter{margin-top:12px;padding-top:12px;border-top:1px solid var(--line)}
 .tree{max-height:490px;overflow-y:auto}
 .grp{width:100%;text-align:left;display:flex;align-items:center;gap:6px;
   padding:8px 15px 8px;font:600 11px/1.55 inherit;letter-spacing:.06em;
@@ -185,7 +200,6 @@ a.open:hover{text-decoration:underline}
   <select id="projSel"></select>
   <button class="sm" id="btnNewProj">新建系统</button>
   <button class="sm" id="btnProjSettings">项目设置</button>
-  <button class="sm" id="btnProbeLang" title="打开首页、点开语言切换菜单，把候选文案读出来，省得手动 F12 抄">探测语言选项</button>
   <span id="globalState"><span class="dot"></span><span id="stateText">空闲</span></span>
   <a href="/logout" style="margin-left:8px;font-size:12px;color:var(--ink-3);text-decoration:none">退出登录</a>
 </header>
@@ -231,46 +245,58 @@ a.open:hover{text-decoration:underline}
     <div class="card">
       <h2>操作</h2>
       <div class="body">
-        <div class="row btns fill">
-          <button id="btnDiscover">扫描系统菜单</button>
-        </div>
-        <div class="hint" style="margin-bottom:14px">
-          登录后展开左侧菜单，逐个访问并识别有没有表格、能不能导出。首次使用先点这个。
-        </div>
-        <div class="row btns fill">
-          <button id="btnGen">生成用例</button>
-          <button id="btnRegen">重新生成用例</button>
-          <button class="primary" id="btnRunSel">执行测试</button>
-        </div>
-        <div class="hint" style="margin-bottom:10px">
-          「生成用例」不会覆盖已有 YAML；「重新生成用例」会覆盖当前已勾选页面的 YAML。
-          「执行测试」跑勾选的页面，全程只登录一次。
-        </div>
-        <div class="tag-filter" id="langFilter" style="display:none;margin-bottom:8px">
-          <div class="tf-title">
-            执行语言<span class="tf-hint">（先选语言，再勾下面要跑的类别——除多语言检查外的用例都会先切到这门语言再跑，用来验证切换语言后功能是否还正常）</span>
+        <div class="step">
+          <div class="step-h">1 · 扫描系统菜单</div>
+          <div class="row btns fill">
+            <button id="btnDiscover">扫描系统菜单</button>
           </div>
-          <div class="tf-list">
-            <select id="langSelect" style="font-size:12.5px;padding:3px 6px">
-              <option value="">默认语言（不切换）</option>
-            </select>
-          </div>
+          <div class="hint">登录后展开左侧菜单，逐个访问并识别有没有表格、能不能导出。首次使用先点这个。</div>
         </div>
-        <div class="tag-filter">
-          <div class="tf-title">
-            只执行勾选的类别<span class="tf-hint">（都不选 = 全部一起跑；想漏掉一两类，点"全选"再取消勾选它们）</span>
-            <button class="link sm" type="button" id="btnTagAll" style="margin-left:auto">全选</button>
-            <button class="link sm" type="button" id="btnTagNone">清空</button>
+        <div class="step">
+          <div class="step-h">2 · 生成用例</div>
+          <div class="row btns fill">
+            <button id="btnGen">生成用例</button>
+            <button id="btnRegen">重新生成用例</button>
           </div>
-          <div class="tf-list">
-            <label><input type="checkbox" data-tagf value="smoke"> 冒烟</label>
-            <label><input type="checkbox" data-tagf value="health"> 健康检查</label>
-            <label><input type="checkbox" data-tagf value="search"> 搜索筛选</label>
-            <label><input type="checkbox" data-tagf value="list"> 列表分页</label>
-            <label><input type="checkbox" data-tagf value="export"> 导出</label>
-            <label><input type="checkbox" data-tagf value="crud"> 新增/修改/删除</label>
-            <label><input type="checkbox" data-tagf value="i18n"> 多语言</label>
+          <div class="hint">「生成用例」不会覆盖已有 YAML；「重新生成用例」会覆盖当前已勾选页面的 YAML。</div>
+        </div>
+        <div class="step">
+          <div class="step-h">3 · 执行测试</div>
+          <div class="row btns fill">
+            <button class="primary" id="btnRunSel">执行测试</button>
           </div>
+          <div class="hint">跑勾选的页面，全程只登录一次。</div>
+          <details class="exec-opts" id="execOpts">
+            <summary>执行选项<span id="execOptsBadge"></span></summary>
+            <div class="exec-opts-body">
+              <div class="tag-filter" id="langFilter" style="display:none">
+                <div class="tf-title">
+                  执行语言<span class="tf-hint">（先选语言，再勾下面要跑的类别——除多语言检查外的用例都会先切到这门语言再跑，用来验证切换语言后功能是否还正常）</span>
+                </div>
+                <div class="tf-list">
+                  <select id="langSelect" style="font-size:12.5px;padding:3px 6px">
+                    <option value="">默认语言（不切换）</option>
+                  </select>
+                </div>
+              </div>
+              <div class="tag-filter">
+                <div class="tf-title">
+                  只执行勾选的类别<span class="tf-hint">（都不选 = 全部一起跑；想漏掉一两类，点"全选"再取消勾选它们）</span>
+                  <button class="link sm" type="button" id="btnTagAll" style="margin-left:auto">全选</button>
+                  <button class="link sm" type="button" id="btnTagNone">清空</button>
+                </div>
+                <div class="tf-list">
+                  <label><input type="checkbox" data-tagf value="smoke"> 冒烟</label>
+                  <label><input type="checkbox" data-tagf value="health"> 健康检查</label>
+                  <label><input type="checkbox" data-tagf value="search"> 搜索筛选</label>
+                  <label><input type="checkbox" data-tagf value="list"> 列表分页</label>
+                  <label><input type="checkbox" data-tagf value="export"> 导出</label>
+                  <label><input type="checkbox" data-tagf value="crud"> 新增/修改/删除</label>
+                  <label><input type="checkbox" data-tagf value="i18n"> 多语言</label>
+                </div>
+              </div>
+            </div>
+          </details>
         </div>
       </div>
     </div>
@@ -308,7 +334,7 @@ a.open:hover{text-decoration:underline}
   </div>
 </div>
 <div id="toast"></div>
-<div class="mask" id="yamlMask"><div class="modal" style="width:860px"><h3 id="yamlTitle">编辑 YAML</h3><div class="body"><textarea id="yamlText" spellcheck="false"></textarea></div><div class="foot"><button id="yamlCancel">取消</button><button class="primary" id="yamlSave">保存</button></div></div></div>
+<div class="mask" id="yamlMask"><div class="modal" style="width:860px"><h3 id="yamlTitle">编辑 YAML</h3><div class="body"><textarea id="yamlText" spellcheck="false"></textarea></div><div class="foot"><button class="link" id="yamlProbeLang" style="margin-right:auto;display:none" title="打开首页、点开语言切换菜单，把候选文案读出来，省得手动 F12 抄">探测语言选项</button><button id="yamlCancel">取消</button><button class="primary" id="yamlSave">保存</button></div></div></div>
 <div class="mask" id="explainMask"><div class="modal" style="width:640px">
   <h3 id="explainTitle">用例说明</h3>
   <div class="body" id="explainBody" style="max-height:65vh;overflow:auto"></div>
@@ -348,10 +374,21 @@ function renderLangFilter(){
   const box=$('#langFilter'), sel=$('#langSelect');
   const options=(proj&&proj.languages&&proj.languages.options)||{};
   const codes=Object.keys(options);
-  if(!codes.length){box.style.display='none';sel.innerHTML='<option value="">默认语言（不切换）</option>';return;}
-  box.style.display='';
-  sel.innerHTML='<option value="">默认语言（不切换）</option>'+
-    codes.map(c=>'<option value="'+esc(c)+'">'+esc(options[c])+'</option>').join('');
+  if(!codes.length){box.style.display='none';sel.innerHTML='<option value="">默认语言（不切换）</option>';}
+  else{
+    box.style.display='';
+    sel.innerHTML='<option value="">默认语言（不切换）</option>'+
+      codes.map(c=>'<option value="'+esc(c)+'">'+esc(options[c])+'</option>').join('');
+  }
+  updateExecOptsBadge();
+}
+function updateExecOptsBadge(){
+  const bits=[];
+  const langSel=$('#langSelect');
+  if(langSel.value) bits.push(langSel.selectedOptions[0].textContent);
+  const tags=selectedTags();
+  if(tags.length) bits.push(tags.length+' 类');
+  $('#execOptsBadge').textContent=bits.length?'（'+bits.join(' · ')+'）':'';
 }
 $('#projSel').onchange = loadProject;
 $('#btnFoldAll').onclick=()=>{
@@ -508,6 +545,7 @@ function openYamlEditor(opts){
   $('#yamlMask').dataset.kind=opts.kind;
   $('#yamlMask').dataset.saveUrl=opts.saveUrl;
   $('#yamlMask').dataset.i=opts.i!=null?opts.i:'';
+  $('#yamlProbeLang').style.display=opts.kind==='project'?'':'none';
 }
 $('#yamlCancel').onclick=()=>$('#yamlMask').classList.remove('show');
 $('#yamlSave').onclick=async()=>{
@@ -533,15 +571,16 @@ $('#btnProjSettings').onclick=async()=>{
   openYamlEditor({title:'项目设置 · '+proj.name,content:r.content,kind:'project',
     saveUrl:'/api/projects/'+encodeURIComponent(proj.dir)+'/settings'});
 };
-$('#btnProbeLang').onclick=async()=>{
+$('#yamlProbeLang').onclick=async()=>{
   if(!proj)return toast('请先选择或新建一个系统',true);
   const cur=(proj.languages&&proj.languages.switcher_trigger)||'';
   const trigger=prompt('语言切换控件的选择器（F12 找触发元素，比如 .lang-switch）：',cur);
   if(!trigger)return;
   const r=await post('/api/run',{action:'probe-lang',project:proj.dir,trigger:trigger});
   if(!r.ok||!r.data.ok)return toast(r.data.msg||'启动失败',true);
+  $('#yamlMask').classList.remove('show');
   term.innerHTML='';everStreamed=true;hideProgress();resetLogs();setBusy(true);
-  toast('探测结果稍后会打印在下面「运行日志」里，抄到「项目设置」的 languages 里即可');
+  toast('探测结果稍后会打印在下面「运行日志」里，抄到 languages 里保存即可');
 };
 
 function lineClass(s){
@@ -677,8 +716,9 @@ async function loadReports(){
 function selectedTags(){
   return [...document.querySelectorAll('[data-tagf]:checked')].map(el=>el.value);
 }
-$('#btnTagAll').onclick=()=>document.querySelectorAll('[data-tagf]').forEach(el=>el.checked=true);
-$('#btnTagNone').onclick=()=>document.querySelectorAll('[data-tagf]').forEach(el=>el.checked=false);
+$('#btnTagAll').onclick=()=>{document.querySelectorAll('[data-tagf]').forEach(el=>el.checked=true);updateExecOptsBadge();};
+$('#btnTagNone').onclick=()=>{document.querySelectorAll('[data-tagf]').forEach(el=>el.checked=false);updateExecOptsBadge();};
+$('#execOpts').addEventListener('change',updateExecOptsBadge);
 async function trigger(action, overwrite=false){
   if(!proj) return toast('请先选择或新建一个系统',true);
   const sel=pages.filter(p=>p.selected);
@@ -705,7 +745,7 @@ $('#btnStop').onclick=async()=>{const r=await post('/api/stop');
   toast(r.data.ok?'已发送终止信号':'当前没有运行中的任务',!r.data.ok);};
 $('#btnClear').onclick=()=>{term.innerHTML='<span class="empty">日志已清空。</span>';everStreamed=false;hideProgress();resetLogs();};
 function setBusy(b){
-  ['#btnDiscover','#btnGen','#btnRegen','#btnRunSel','#btnNewProj','#btnProbeLang'].forEach(s=>$(s).disabled=b);
+  ['#btnDiscover','#btnGen','#btnRegen','#btnRunSel','#btnNewProj','#yamlProbeLang'].forEach(s=>$(s).disabled=b);
   $('#btnStop').disabled=!b;
   if(b) setState('busy','执行中');
 }
