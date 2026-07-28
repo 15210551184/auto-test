@@ -62,10 +62,8 @@ button.danger:hover:not(:disabled){background:#fdeced}
 .hint{font-size:12px;color:var(--ink-3);margin-top:9px;line-height:1.5}
 .tag-filter{border:1px solid var(--line);border-radius:5px;padding:9px 11px;background:#fafbfc}
 .tf-title{font-size:12px;color:var(--ink-2);margin-bottom:7px;display:flex;
-  align-items:center;gap:12px;flex-wrap:wrap}
-.tf-mode{display:inline-flex;align-items:center;gap:4px;cursor:pointer}
-.tf-mode input{cursor:pointer}
-.tf-hint{color:var(--ink-3)}
+  align-items:center;gap:10px;flex-wrap:wrap}
+.tf-hint{color:var(--ink-3);font-weight:400}
 .tf-list{display:flex;flex-wrap:wrap;gap:4px 14px}
 .tf-list label{display:flex;align-items:center;gap:5px;font-size:12.5px;
   color:var(--ink);cursor:pointer;margin:0}
@@ -249,9 +247,9 @@ a.open:hover{text-decoration:underline}
         </div>
         <div class="tag-filter">
           <div class="tf-title">
-            <label class="tf-mode"><input type="radio" name="tagMode" value="only" checked> 只执行勾选的</label>
-            <label class="tf-mode"><input type="radio" name="tagMode" value="exclude"> 排除勾选的</label>
-            <span class="tf-hint">（都不选 = 全部一起跑）</span>
+            只执行勾选的类别<span class="tf-hint">（都不选 = 全部一起跑；想漏掉一两类，点"全选"再取消勾选它们）</span>
+            <button class="link sm" type="button" id="btnTagAll" style="margin-left:auto">全选</button>
+            <button class="link sm" type="button" id="btnTagNone">清空</button>
           </div>
           <div class="tf-list">
             <label><input type="checkbox" data-tagf value="smoke"> 冒烟</label>
@@ -648,10 +646,8 @@ async function loadReports(){
 function selectedTags(){
   return [...document.querySelectorAll('[data-tagf]:checked')].map(el=>el.value);
 }
-function tagFilterMode(){
-  const el=document.querySelector('input[name=tagMode]:checked');
-  return el?el.value:'only';
-}
+$('#btnTagAll').onclick=()=>document.querySelectorAll('[data-tagf]').forEach(el=>el.checked=true);
+$('#btnTagNone').onclick=()=>document.querySelectorAll('[data-tagf]').forEach(el=>el.checked=false);
 async function trigger(action, overwrite=false){
   if(!proj) return toast('请先选择或新建一个系统',true);
   const sel=pages.filter(p=>p.selected);
@@ -662,12 +658,7 @@ async function trigger(action, overwrite=false){
   const body={action:action,project:proj.dir,overwrite:overwrite};
   if(action==='batch-run'){
     const tags=selectedTags();
-    if(tags.length){
-      // 都不选就不传，后端默认跑全部；"排除"模式传去 exclude_tags，
-      // 语义是"这些标签的用例不跑，其余全跑"，不用把其余标签一个个勾出来
-      if(tagFilterMode()==='exclude') body.exclude_tags=tags;
-      else body.tags=tags;
-    }
+    if(tags.length) body.tags=tags;   // 都不选就不传 tags，后端默认跑全部
   }
   const r=await post('/api/run',body);
   if(!r.ok||!r.data.ok) return toast(r.data.msg||'启动失败',true);
