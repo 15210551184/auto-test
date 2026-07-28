@@ -35,7 +35,7 @@ class Context:
     """一次页面执行的上下文，贯穿所有 step"""
 
     def __init__(self, page: Page, config: PageConfig, out_dir: str,
-                target_language: Optional[str] = None):
+                target_language: Optional[str] = None, report_root: Optional[str] = None):
         self.page = page
         self.config = config
         self.ui = ElementUIAdapter()
@@ -50,6 +50,13 @@ class Context:
         self.console_errors: List[str] = []
         self.failed_requests: List[str] = []
         self.out_dir = out_dir
+        # report_root：截图相对路径要相对谁计算——单页执行时 report.html 就写
+        # 在 out_dir 里，两者相同；批量执行时每个页面各有自己的子目录
+        # （out_dir 是子目录），但汇总的 report.html 写在批量任务的顶层目录，
+        # 不给 report_root 就会用 out_dir 算出"相对子目录自己"的路径，
+        # report.html 按它自己的位置去解析就会指向不存在的文件——
+        # 图裂了，用户看不到失败截图，等于白截。
+        self.report_root = report_root or out_dir
         self.download_dir = os.path.join(out_dir, "downloads")
         self.shots_dir = os.path.join(out_dir, "screenshots")
         os.makedirs(self.download_dir, exist_ok=True)
@@ -151,7 +158,7 @@ class Context:
             self.page.screenshot(path=path, full_page=False)
         except Exception:
             return ""
-        return os.path.relpath(path, self.out_dir)
+        return os.path.relpath(path, self.report_root)
 
     def reset_signals(self):
         self.console_errors.clear()

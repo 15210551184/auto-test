@@ -234,7 +234,10 @@ def run_selected(dir_name: str, out_dir: str,
 
             page_out = os.path.join(out_dir, f"{idx + 1:02d}_{P._safe(name)}")
             os.makedirs(page_out, exist_ok=True)
-            ctx = Context(page, cfg, page_out, target_language=target_language)
+            # report_root=out_dir：截图存在 page_out（每个页面自己的子目录）里，
+            # 但汇总的 report.html 写在 out_dir 顶层——截图相对路径必须相对
+            # report.html 的位置算，不然报告里的图全部裂掉（用户看不到失败截图）。
+            ctx = Context(page, cfg, page_out, target_language=target_language, report_root=out_dir)
             pr = PageResult(cfg.name, cfg.url)
 
             cases = filter_cases_by_tags(cfg.cases, only_tags, exclude_tags)
