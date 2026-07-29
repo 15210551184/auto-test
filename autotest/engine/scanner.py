@@ -606,7 +606,17 @@ def _merge_positional(variants: Dict[str, Dict[str, str]], canonical: List[str],
 
 def scan(url: str, storage_state: Optional[str] = None,
          headless: bool = True, wait: int = 3000,
-         languages: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+         languages: Optional[Dict[str, Any]] = None,
+         login: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """
+    传了 login 就走懒登录（cookie 还有效就直接用，过期了才真正登录一次并
+    把新 cookie 存回去）——不传就是纯用 storage_state 里的 cookie，cookie
+    过期会悄悄停在登录页扫描：真实事故是批量扫描 40 个页面，扫到中间某个
+    页面时 cookie 刚好过期，页面被重定向到登录页，扫描器在登录页上"正常"
+    扫完（表单/按钮识别不到东西，list_api 兜底捡到登录页自己的验证码图片
+    接口），生成一份看着能跑、实际全是空壳的配置——不报错，比直接失败更
+    危险，因为不会有人第一时间发现这份配置是废的。
+    """
     with sync_playwright() as pw:
         browser = B.launch(pw, headless=headless)
         args = B.context_args()
@@ -616,7 +626,12 @@ def scan(url: str, storage_state: Optional[str] = None,
         bctx = browser.new_context(**args)
         page = bctx.new_page()
         sc = PageScanner(page)
-        page.goto(url, wait_until="domcontentloaded", timeout=60000)
+        if login:
+            did = ensure_logged_in(page, url, login)
+            if did and storage_state:
+                save_storage_state(bctx, storage_state)
+        else:
+            page.goto(url, wait_until="domcontentloaded", timeout=60000)
         # 曾经改成"等到第一个 api/json 响应就继续"想省点时间，结果翻车：
         # 页面进来常先打几个无关请求（权限校验/字典/当前用户），一旦命中这种
         # 早到的响应，只再等一点点就去扫表单/按钮，搜索框、筛选项、导出按钮

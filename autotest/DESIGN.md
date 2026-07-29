@@ -355,8 +355,7 @@ else:
 
 **批量扫描并发 + 超时预算按语言数量走**：`batch.scan_selected()` 最多
 `concurrency` 个页面并发扫描（默认 2，跟 `run_selected()` 一样，不需要
-`run_selected()` 那套"先登录一次共享 cookie"的协调——`scanner.scan()`
-本身只读 `storage_state` 文件，不主动登录也不回写，多个 worker 同时读
+`run_selected()` 那套"先登录一次共享 cookie"的协调——多个 worker 同时读
 同一份 cookie 文件没有写冲突，直接各自起独立的 `sync_playwright()` 会话
 并发跑即可）。单页扫描的硬超时（`SCAN_TIMEOUT_SEC`，默认 150s）按项目配的
 语言数量成正比增加（`_scan_timeout_for()`，每种语言多给 `LANG_SCAN_
@@ -364,6 +363,16 @@ BUDGET_SEC`=30s）——配了多语言的项目，`scan_language_variants()` �
 每种语言切一次、重新扫一遍表单/表头/弹窗字段，纯 CRUD 页面也会因为这部分
 多花不少时间，所有页面共用同一个只按"不带多语言"估的固定上限会导致
 配了语言的项目大批量假性超时。
+
+**扫描也要走懒登录**：`scanner.scan()` 早先图省事只 `page.goto()`，不主动
+登录也不检查会话是否过期——真实事故：批量扫描几十个页面，扫到中间某个
+页面时 cookie 刚好过期，页面被重定向到登录页，扫描器在登录页上"正常"
+扫完（表单/按钮识别不到业务内容，`list_api` 兜底捡到登录页自己的验证码
+图片接口），生成一份看着能跑、实际全是空壳的配置——不报错，比直接失败
+更危险，因为不会有第一时间的信号提示这份配置是废的。跟 `probe_languages()`
+一样的修法：`scan()` 加了可选的 `login` 参数，传了就走 `ensure_logged_in()`
+（cookie 有效直接用，过期了才真正登录一次并把新 cookie 存回去），
+`batch.scan_selected()` 会把项目的 `login` 配置传进去。
 
 ### 4.2 列名映射：一个刻意保守的设计
 

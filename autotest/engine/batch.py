@@ -80,7 +80,7 @@ def _scan_timeout_for(languages: Optional[Dict], base: int = SCAN_TIMEOUT_SEC) -
 
 
 def _scan_with_timeout(url: str, storage_state: Optional[str], timeout: int = SCAN_TIMEOUT_SEC,
-                       languages: Optional[Dict] = None) -> Dict:
+                       languages: Optional[Dict] = None, login: Optional[Dict] = None) -> Dict:
     """
     在子线程里跑 scanner.scan()，超时就放弃等待、把这一页判失败，不拖死整批任务。
 
@@ -95,7 +95,7 @@ def _scan_with_timeout(url: str, storage_state: Optional[str], timeout: int = SC
     def worker():
         try:
             box["report"] = scanner.scan(url, storage_state=storage_state, headless=True,
-                                         languages=languages)
+                                         languages=languages, login=login)
         except Exception as e:
             box["error"] = e
 
@@ -158,7 +158,8 @@ def scan_selected(dir_name: str, storage_state: Optional[str] = None,
 
         try:
             _log(on_log, f"{tag} 扫描中…")
-            rep = _scan_with_timeout(url, storage_state, languages=proj.get("languages"))
+            rep = _scan_with_timeout(url, storage_state, languages=proj.get("languages"),
+                                     login=proj.get("login"))
             cfg = scanner.to_config(rep, name=name, languages=proj.get("languages"))
             cfg = P.inject_project_settings(cfg, proj)
             dest.parent.mkdir(parents=True, exist_ok=True)
