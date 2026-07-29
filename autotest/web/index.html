@@ -30,6 +30,11 @@ header .sep{color:var(--line)}
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:.25}}
 .wrap{max-width:1400px;margin:0 auto;padding:18px 20px 40px;
   display:grid;grid-template-columns:1fr 400px;gap:18px;align-items:start}
+/* grid/flex 子项默认 min-width:auto（按内容撑开），运行日志标签页多的时候
+   （批量扫描几十个页面，每个页面一个标签）标签行的内容宽度会一路网上
+   传导，把整个 .wrap 甚至 body 撑宽出现横向滚动条——每一层都得显式给
+   min-width:0，标签行自己的 overflow-x:auto 才真的管用，不然形同虚设。 */
+.wrap>div{min-width:0}
 @media(max-width:1000px){.wrap{grid-template-columns:1fr}}
 /* 宽屏下把左列（菜单树 + 运行日志）锁进一屏高度，两张卡各自内部滚动——
    之前是页面整体往下滚才能看到运行日志，跑测试时经常要边看日志边勾
@@ -37,8 +42,8 @@ header .sep{color:var(--line)}
    触屏上"锁高度+内部滚动"体验反而更别扭。 */
 @media(min-width:1001px){
   .wrap{height:calc(100vh - 52px)}
-  .col-left,.col-right{display:flex;flex-direction:column;gap:16px;min-height:0;height:100%}
-  .col-left>.card,.col-right>.card{margin-bottom:0;min-height:0}
+  .col-left,.col-right{display:flex;flex-direction:column;gap:16px;min-height:0;min-width:0;height:100%}
+  .col-left>.card,.col-right>.card{margin-bottom:0;min-height:0;min-width:0}
   .col-left>.card:not(.term-card){flex:1 1 58%;display:flex;flex-direction:column}
   .col-left>.card:not(.term-card) .tree{flex:1;max-height:none}
   .col-left>.card.term-card{flex:1 1 42%;display:flex;flex-direction:column}
