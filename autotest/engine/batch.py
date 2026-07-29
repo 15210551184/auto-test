@@ -158,7 +158,13 @@ def scan_selected(dir_name: str, storage_state: Optional[str] = None,
 
         try:
             _log(on_log, f"{tag} 扫描中…")
-            rep = _scan_with_timeout(url, storage_state, languages=proj.get("languages"),
+            # 个别页面（大量级联下拉、地图选点、"新增"弹窗字段特别多）扫描
+            # 本来就比一般页面慢，不该为了它们把所有页面的超时都调大——
+            # 项目设置里给这一页单独加 scan_timeout（秒）就行，不给就用
+            # 全局默认的 SCAN_TIMEOUT_SEC。
+            page_timeout = pg.get("scan_timeout") or SCAN_TIMEOUT_SEC
+            rep = _scan_with_timeout(url, storage_state, timeout=page_timeout,
+                                     languages=proj.get("languages"),
                                      login=proj.get("login"))
             cfg = scanner.to_config(rep, name=name, languages=proj.get("languages"))
             cfg = P.inject_project_settings(cfg, proj)
