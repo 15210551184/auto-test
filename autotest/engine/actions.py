@@ -131,10 +131,14 @@ def do_search(ctx, **kw):
     """
     点搜索 + 等接口，合成一步，配置里最常用。
 
-    批量执行默认并发跑多个页面，同一时间好几个 Chromium 一起打同一个后端，
-    接口响应会比单独手动测慢一截，个别请求偶尔会卡过超时线——接口本身没
-    问题，纯粹是那一刻凑巧撞上了并发高峰。超时先重试一次（等一拍再点一次
-    搜索），大概率第二次就赶上峰值过去了；两次都超时才是真的该报的问题。
+    等接口超时有两种完全不同的原因：
+    1. 批量执行并发跑多个页面时，接口响应比单独手动测慢一截，偶尔卡过
+       超时线——接口本身没问题，纯粹是撞上了并发高峰。超时先重试一次
+       （等一拍再点一次搜索），大概率第二次就赶上峰值过去了。
+    2. list_api 这个 URL 片段配错了/过期了——页面搜索其实成功了，只是
+       等的 URL 跟实际触发的接口对不上，两次重试都不会有用（等的目标
+       根本不存在）。两次都超时后，失败消息里会把这期间实际收到的
+       JSON 接口列出来，方便直接判断是"接口慢"还是"list_api 配错了"。
     超时时长可以在页面配置里用 search_timeout（毫秒）单独调，默认 30s。
     """
     frag = ctx.config.list_api
@@ -149,9 +153,22 @@ def do_search(ctx, **kw):
                 ) as info:
                     ctx.page.locator(btn).first.click()
                 break
-            except PlaywrightTimeoutError:
+            except PlaywrightTimeoutError as e:
                 if attempt == 1:
-                    raise
+                    # 两次都等不到——很可能不是"响应慢"，是 list_api 这个
+                    # URL 片段本身就配错了，页面搜索其实早就成功了，只是
+                    # 触发的接口 URL 跟配置里等的那个对不上，永远等不到。
+                    # api_log 里这段时间实际收到的 JSON 接口摆出来，比让人
+                    # 去猜"到底是慢还是配错了"直接得多。
+                    seen = [c["url"] for c in ctx.api_log[-8:]]
+                    hint = (f"配置的 list_api '{frag}' 一直没等到匹配的响应。"
+                           f"这期间实际收到的接口: {seen}——如果这里面有一个明显才是"
+                           f"真正的列表接口，说明 list_api 配错了，不是接口慢，"
+                           f"改一下配置里的 list_api 就行。"
+                           if seen else
+                           f"配置的 list_api '{frag}' 一直没等到匹配的响应，这期间"
+                           f"也没收到任何 JSON 接口响应，可能页面根本没发起请求。")
+                    raise PlaywrightTimeoutError(f"{e}\n{hint}") from e
                 retried = True
                 ctx.page.wait_for_timeout(800)   # 给并发高峰一点时间过去，再重试
         try:

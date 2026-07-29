@@ -79,10 +79,11 @@ class FakeConfig:
 
 
 class FakeCtx:
-    def __init__(self, outcomes):
+    def __init__(self, outcomes, api_log=None):
         self.page = FakeSearchPage(outcomes)
         self.config = FakeConfig()
         self.last_api = None
+        self.api_log = api_log if api_log is not None else []
 
     def selector(self, key):
         return "button:has-text('搜索')"
@@ -112,6 +113,28 @@ class SearchRetryTests(unittest.TestCase):
         with self.assertRaises(PlaywrightTimeoutError):
             do_search(ctx)
         self.assertEqual(2, ctx.page.click_count)
+
+    def test_two_timeouts_lists_actually_seen_urls_in_message(self):
+        # 真实案例：list_api 配错了（配置里等的 URL 跟页面实际触发的接口
+        # 对不上），两次重试都不会有用——失败消息里得把这期间实际收到的
+        # JSON 接口摆出来，让人一眼看出"是接口慢还是配置错了"，不用去点开
+        # 报告里单独的接口调用区块才能查。
+        api_log = [
+            {"url": "http://x.test/api/vaWeb/getInfo?lang=zh"},
+            {"url": "http://x.test/api/vaWeb/system/manage/list?name=x"},
+        ]
+        ctx = FakeCtx(["timeout", "timeout"], api_log=api_log)
+        with self.assertRaises(PlaywrightTimeoutError) as cm:
+            do_search(ctx)
+        msg = str(cm.exception)
+        self.assertIn(ctx.config.list_api, msg)
+        self.assertIn("http://x.test/api/vaWeb/system/manage/list?name=x", msg)
+
+    def test_two_timeouts_with_no_api_calls_says_so(self):
+        ctx = FakeCtx(["timeout", "timeout"], api_log=[])
+        with self.assertRaises(PlaywrightTimeoutError) as cm:
+            do_search(ctx)
+        self.assertIn("没收到任何 JSON 接口响应", str(cm.exception))
 
     def test_uses_configured_search_timeout(self):
         # search_timeout 页面配置能覆盖默认值，不是写死的 30000
