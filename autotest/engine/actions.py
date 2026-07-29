@@ -130,8 +130,11 @@ def do_search(ctx, **kw):
     frag = ctx.config.list_api
     btn = ctx.selector("search_btn")
     if frag:
+        # 批量执行默认并发跑多个页面，同一时间好几个 Chromium 一起打同一个
+        # 后端，接口响应会比单独手动测慢一截——20s 在并发下偶尔差一点点
+        # 就超时（实测卡在 21~22s），接口本身不慢，纯粹是等的时间不够留余量。
         with ctx.page.expect_response(
-            lambda r: frag in r.url and r.status == 200, timeout=20000
+            lambda r: frag in r.url and r.status == 200, timeout=30000
         ) as info:
             ctx.page.locator(btn).first.click()
         try:
