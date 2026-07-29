@@ -542,7 +542,7 @@ function renderTree(){
       h+='<label class="item lvl'+depth+' '+(p.selected?'':'off')+'" style="padding-left:'+(15+depth*16+18)+'px">'+
          '<input type="checkbox" data-i="'+i+'" '+(p.selected?'checked':'')+'>'+
          '<span class="nm">'+esc(p.name)+'</span>'+
-         '<span class="tags">'+tags.join('')+(p.has_config?'<button class="link sm" type="button" data-explain="'+i+'">查看说明</button><button class="link sm" type="button" data-yaml="'+i+'">编辑 YAML</button>':'')+'<button class="danger sm" type="button" data-del="'+i+'">删除</button></span></label>';
+         '<span class="tags">'+tags.join('')+(p.has_config?'<button class="link sm" type="button" data-explain="'+i+'">查看说明</button><button class="link sm" type="button" data-yaml="'+i+'">编辑 YAML</button><button class="link sm" type="button" data-relist="'+i+'" title="只重新探测列表接口，不重新识别表单/表头/按钮，几秒钟就好，也不会覆盖手工加的断言">重探接口</button>':'')+'<button class="danger sm" type="button" data-del="'+i+'">删除</button></span></label>';
     });
   }
   tree.innerHTML=h;
@@ -573,6 +573,14 @@ function renderTree(){
       collapsedGroups.has(g)?collapsedGroups.delete(g):collapsedGroups.add(g);renderTree();};
   });
   tree.querySelectorAll('[data-yaml]').forEach(btn=>{btn.onclick=async e=>{e.preventDefault();e.stopPropagation();const p=pages[+btn.dataset.yaml],r=await get('/api/projects/'+encodeURIComponent(proj.dir)+'/pages/'+encodeURIComponent(p.name)+'/config');if(!r.ok)return toast(r.msg||'读取 YAML 失败',true);openYamlEditor({title:'编辑 YAML · '+p.name,content:r.content,kind:'page',i:btn.dataset.yaml,saveUrl:'/api/projects/'+encodeURIComponent(proj.dir)+'/pages/'+encodeURIComponent(p.name)+'/config'});};});
+  tree.querySelectorAll('[data-relist]').forEach(btn=>{btn.onclick=async e=>{
+    e.preventDefault();e.stopPropagation();
+    const p=pages[+btn.dataset.relist];
+    const r=await post('/api/run',{action:'redetect-list-api',project:proj.dir,page:p.name});
+    if(!r.ok||!r.data.ok)return toast(r.data.msg||'启动失败',true);
+    term.innerHTML='';everStreamed=true;hideProgress();resetLogs();setBusy(true);
+    toast('重新探测「'+p.name+'」的列表接口中，结果稍后打印在运行日志里');
+  };});
   tree.querySelectorAll('[data-explain]').forEach(btn=>{btn.onclick=async e=>{
     e.preventDefault();e.stopPropagation();
     const p=pages[+btn.dataset.explain];

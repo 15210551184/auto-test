@@ -198,6 +198,21 @@ def cmd_probe_lang(a):
         print(f"    {t}: {t}")
 
 
+def cmd_redetect_list_api(a):
+    """只重新探测一个页面的 list_api，不用整页重新扫描——list_api 猜错了
+    是最常见的"只有一个字段不对"场景，为了修它没必要连表单/表头/按钮/
+    弹窗一起重扫一遍，那样既慢，还会把手工加的业务断言一起冲掉。"""
+    try:
+        r = batch.redetect_list_api(a.project, a.page, storage_state=a.state, on_log=print)
+    except ValueError as e:
+        print(f"✗ {e}")
+        sys.exit(1)
+    if not r["changed"]:
+        print("list_api 未改动")
+    else:
+        print(f"已更新: {r['old']} -> {r['new']}")
+
+
 def cmd_auto(a):
     print(f"扫描 {a.url} ...")
     rep = scanner.scan(a.url, storage_state=a.state, headless=True)
@@ -266,6 +281,11 @@ def main():
     s9.add_argument("project")
     s9.add_argument("--trigger", required=True, help="语言切换控件的选择器（F12 找）")
     s9.set_defaults(func=cmd_probe_lang)
+
+    s10 = sub.add_parser("redetect-list-api", help="只重新探测一个页面的列表接口，不整页重新扫描")
+    s10.add_argument("project")
+    s10.add_argument("page")
+    s10.set_defaults(func=cmd_redetect_list_api)
 
     s5 = sub.add_parser("test-login", help="只验证账号密码能否登录")
     s5.add_argument("config")

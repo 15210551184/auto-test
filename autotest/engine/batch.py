@@ -24,7 +24,7 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
-from typing import Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 import yaml
 from playwright.sync_api import sync_playwright
@@ -187,6 +187,47 @@ def scan_selected(dir_name: str, storage_state: Optional[str] = None,
 
     _log(on_log, f"扫描完成：新建 {counters['made']}，跳过 {counters['skipped']}，失败 {counters['failed']}")
     return {"made": counters["made"], "skipped": counters["skipped"], "failed": counters["failed"]}
+
+
+def redetect_list_api(dir_name: str, page_name: str,
+                      storage_state: Optional[str] = None,
+                      on_log: Callable = None) -> Dict[str, Any]:
+    """
+    只重新探测一个页面的 list_api，不做全量重新扫描。
+
+    list_api 猜错了很常见（同源的全局小组件轮询接口凑巧压中最后一条、
+    URL 命名巧合），但为了修这一个字段没必要走"重新生成用例"——那条
+    路径会把这个页面的表单/表头/按钮/弹窗全部重新识别一遍，本来就没错的
+    部分陪跑不说，还会覆盖掉用户手工加在这份配置里的业务断言。这里只
+    调 scanner.redetect_list_api()（跳过表单/按钮/分页/弹窗识别，只探测
+    列表接口），拿到新值后只改配置文件里的 list_api 一个字段，其余原样
+    保留。
+    """
+    proj = P.load_project(dir_name)
+    if not proj:
+        raise ValueError("项目不存在")
+    pg = next((p for p in proj.get("pages", []) if p.get("name") == page_name), None)
+    if not pg or not pg.get("url"):
+        raise ValueError(f"页面「{page_name}」不存在或没有 URL")
+    dest = P.page_config_path(dir_name, page_name)
+    if not dest.exists():
+        raise ValueError(f"页面「{page_name}」还没有生成过配置，请先「生成用例」")
+
+    cfg = yaml.safe_load(dest.read_text(encoding="utf-8")) or {}
+    old = cfg.get("list_api")
+    _log(on_log, f"[{page_name}] 当前 list_api: {old}")
+    new = scanner.redetect_list_api(pg["url"], storage_state, login=proj.get("login"))
+    if not new:
+        _log(on_log, f"[{page_name}] 没探测到任何候选接口，list_api 保持不变")
+        return {"old": old, "new": None, "changed": False}
+    if new == old:
+        _log(on_log, f"[{page_name}] 重新探测结果跟原来一致，未改动")
+        return {"old": old, "new": new, "changed": False}
+
+    cfg["list_api"] = new
+    dest.write_text(yaml.dump(cfg, allow_unicode=True, sort_keys=False, width=110), encoding="utf-8")
+    _log(on_log, f"[{page_name}] 重新探测到: {new}，已写回配置")
+    return {"old": old, "new": new, "changed": True}
 
 
 def run_selected(dir_name: str, out_dir: str,

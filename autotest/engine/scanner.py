@@ -27,6 +27,7 @@ class PageScanner:
     def __init__(self, page: Page):
         self.page = page
         self.api_calls: List[str] = []
+        self._api_bodies: Dict[str, str] = {}   # 只存"像列表接口"的候选，避免每个响应体都存
         self._ui = ElementUIAdapter()   # 只借用它关弹窗，不复用别的运行期逻辑
         page.on("response", self._on_resp)
 
@@ -36,6 +37,11 @@ class PageScanner:
             ct = (resp.headers or {}).get("content-type", "")
             if "json" in ct:
                 self.api_calls.append(u)
+                if re.search(r"(list|page|query|search|find)", u, re.I):
+                    try:
+                        self._api_bodies[u] = resp.text()[:8000]
+                    except Exception:
+                        pass
 
     # ---------- 表单识别 ----------
     def scan_form(self) -> List[Dict[str, Any]]:
@@ -421,7 +427,7 @@ class PageScanner:
         m = re.search(r"(\d+)", total_txt)
         return {"has_pagination": True, "total": int(m.group(1)) if m else None}
 
-    def guess_list_api(self) -> Optional[str]:
+    def guess_list_api(self, sample_row: Optional[Dict[str, str]] = None) -> Optional[str]:
         """
         从捕获的请求里挑最像列表接口的那个，取路径片段。
 
@@ -431,23 +437,54 @@ class PageScanner:
         末尾，把真正这个页面的列表接口顶掉——选出来的 list_api 跟这页业务
         毫无关系，执行时怎么等都等不到匹配的响应。
 
-        用页面自己的地址（如 /web/country/list）跟候选接口的路径比对有没有
-        共同的业务词（如 country）来纠偏：同名业务词命中的候选里选最后一个，
-        没有任何候选命中业务词（比如页面地址就是拼音/纯数字 ID，没法提取
-        英文业务词）就退回原来"直接选最后一个"的老办法，不引入新的误判。
+        三层纠偏，一层比一层弱：
+        1. 内容比对——传了表格第一行的样本值（sample_row）就去比候选接口
+           的响应体里有没有这些值。这是最硬的证据："响应里真有页面上看到
+           的这行数据"，比猜名字/猜时序都可靠，能命中的话直接采信。
+        2. 业务词比对——页面自己的地址（如 /web/country/list）跟候选接口
+           路径有没有共同的业务词（如 country），没有内容证据时退到这层。
+        3. 都没有信号（页面地址提取不出英文业务词、样本值也没在任何候选
+           响应体里出现过）就退回原来"直接选最后一个"的老办法。
         """
         cands = [u for u in self.api_calls
                  if re.search(r"(list|page|query|search|find)", u, re.I)]
         if not cands:
             pick = self.api_calls[-1] if self.api_calls else None
         else:
-            page_words = _path_words(urlparse(getattr(self.page, "url", "") or "").path)
-            scored = [u for u in cands if page_words & _path_words(urlparse(u).path)]
-            pick = scored[-1] if scored else cands[-1]
+            pick = (self._pick_by_body_match(cands, sample_row)
+                    or self._pick_by_page_words(cands)
+                    or cands[-1])
         if not pick:
             return None
         path = urlparse(pick).path
         return path if len(path) > 1 else None
+
+    def _pick_by_body_match(self, cands: List[str],
+                            sample_row: Optional[Dict[str, str]]) -> Optional[str]:
+        """
+        谁的响应体里包含的样本值最多就是谁。只用长度 >= 4 的样本值参与比对
+        （"启用"/"否"这类短文案太通用，随便什么响应都可能碰巧包含，反而
+        会误判；日期、手机号、名称这类值足够独特，命中了才算数）。
+        """
+        if not sample_row:
+            return None
+        values = [v.strip() for v in sample_row.values() if v and len(v.strip()) >= 4]
+        if not values:
+            return None
+        best_u, best_score = None, 0
+        for u in cands:   # 顺序遍历，同分取后出现的，跟原来"选最后一个"的直觉一致
+            body = self._api_bodies.get(u)
+            if not body:
+                continue
+            score = sum(1 for v in values if v in body)
+            if score > 0 and score >= best_score:
+                best_u, best_score = u, score
+        return best_u
+
+    def _pick_by_page_words(self, cands: List[str]) -> Optional[str]:
+        page_words = _path_words(urlparse(getattr(self.page, "url", "") or "").path)
+        scored = [u for u in cands if page_words & _path_words(urlparse(u).path)]
+        return scored[-1] if scored else None
 
     # ---------- 多语言合并 ----------
     def switch_language(self, languages: Dict[str, Any], code: str) -> bool:
@@ -671,14 +708,15 @@ def scan(url: str, storage_state: Optional[str] = None,
         # 老老实实固定等，用等待换正确性。
         page.wait_for_timeout(wait)
 
+        table = sc.scan_table()
         report = {
             "url": url,
             "title": page.title(),
             "form_fields": sc.scan_form(),
-            "table": sc.scan_table(),
+            "table": table,
             "buttons": sc.scan_buttons(),
             "pagination": sc.scan_pagination(),
-            "list_api": sc.guess_list_api(),
+            "list_api": sc.guess_list_api(sample_row=table.get("sample_row")),
         }
         # 表单结构放最后扫：它要点开弹窗，对页面状态的改动最大，
         # 放前面会影响表格/按钮的识别
@@ -693,6 +731,42 @@ def scan(url: str, storage_state: Optional[str] = None,
             report["header_variants"] = header_variants
         browser.close()
     return report
+
+
+def redetect_list_api(url: str, storage_state: Optional[str] = None,
+                      headless: bool = True, wait: int = 3000,
+                      login: Optional[Dict[str, Any]] = None) -> Optional[str]:
+    """
+    只重新探测 list_api，不跑完整扫描。
+
+    list_api 猜错是最常见的"只有一个字段不对"场景（同源全局小组件轮询、
+    URL 命名巧合让最后一条候选换了人），为了修这一个字段等一次完整扫描
+    （还要识别表单、按钮、分页、新增弹窗，配了多语言还要来回切换语言）
+    没必要——那些结构本来就没错。这里只做 scan_table()（拿样本值给
+    guess_list_api() 做内容比对）+ guess_list_api()，其余什么都不碰，
+    调用方（batch.redetect_list_api）只把探测到的新值写回已有配置文件的
+    list_api 字段，配置里其它任何内容都不动。
+    """
+    with sync_playwright() as pw:
+        browser = B.launch(pw, headless=headless)
+        args = B.context_args()
+        state = valid_storage_state(storage_state)
+        if state:
+            args["storage_state"] = state
+        bctx = browser.new_context(**args)
+        page = bctx.new_page()
+        sc = PageScanner(page)
+        if login:
+            did = ensure_logged_in(page, url, login)
+            if did and storage_state:
+                save_storage_state(bctx, storage_state)
+        else:
+            page.goto(url, wait_until="domcontentloaded", timeout=60000)
+        page.wait_for_timeout(wait)
+        table = sc.scan_table()
+        api = sc.guess_list_api(sample_row=table.get("sample_row"))
+        browser.close()
+    return api
 
 
 # ---------- 生成配置 ----------

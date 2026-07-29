@@ -344,12 +344,61 @@ class GuessListApiTests(unittest.TestCase):
     list_api 配置执行时永远等不到匹配响应。
     """
 
-    def _sc_with_calls(self, url, calls):
+    def _sc_with_calls(self, url, calls, bodies=None):
         page = FakeMenuPage([[], []])
         page.url = url
         sc = PageScanner(page)
         sc.api_calls = list(calls)
+        sc._api_bodies = dict(bodies or {})
         return sc
+
+    def test_body_content_match_wins_even_without_business_word_in_url(self):
+        # 响应体里真的含有页面表格第一行的样本值——这是最硬的证据，
+        # 哪怕两个候选 URL 长得完全看不出业务归属也该选对。
+        sc = self._sc_with_calls(
+            "http://x.test/web/mod3721",
+            ["http://x.test/api/svc1/list", "http://x.test/api/svc2/list"],
+            bodies={
+                "http://x.test/api/svc1/list": '{"rows":[{"name":"随便什么"}]}',
+                "http://x.test/api/svc2/list": '{"rows":[{"createTime":"2026-07-27 17:15:16"}]}',
+            })
+        sample_row = {"创建时间": "2026-07-27 17:15:16"}
+        self.assertEqual("/api/svc2/list", sc.guess_list_api(sample_row=sample_row))
+
+    def test_body_content_match_overrides_page_word_match(self):
+        # 通知接口的 URL 带业务词 country、但响应体里没有样本值；notice/list
+        # 没有业务词但响应体真的含样本值——内容证据比命名巧合更可信。
+        sc = self._sc_with_calls(
+            "http://x.test/web/country/list",
+            ["http://x.test/api/vaWeb/notice/list",
+             "http://x.test/api/vaWeb/system/country/listWithNoise"],
+            bodies={
+                "http://x.test/api/vaWeb/notice/list": '{"rows":[{"phone":"13800001111"}]}',
+                "http://x.test/api/vaWeb/system/country/listWithNoise": '{"rows":[{"other":"x"}]}',
+            })
+        sample_row = {"手机号": "13800001111"}
+        self.assertEqual("/api/vaWeb/notice/list", sc.guess_list_api(sample_row=sample_row))
+
+    def test_short_sample_values_excluded_from_content_match(self):
+        # "启用"这种两三个字的通用值不参与内容比对，避免碰巧命中误判，
+        # 退回业务词匹配。
+        sc = self._sc_with_calls(
+            "http://x.test/web/country/list",
+            ["http://x.test/api/vaWeb/system/country/list",
+             "http://x.test/api/vaWeb/system/notice/listTop"],
+            bodies={
+                "http://x.test/api/vaWeb/system/notice/listTop": '{"rows":[{"status":"启用"}]}',
+            })
+        sample_row = {"状态": "启用"}
+        self.assertEqual("/api/vaWeb/system/country/list", sc.guess_list_api(sample_row=sample_row))
+
+    def test_no_body_match_falls_back_to_page_words(self):
+        sc = self._sc_with_calls(
+            "http://x.test/web/country/list",
+            ["http://x.test/api/vaWeb/system/country/list",
+             "http://x.test/api/vaWeb/system/notice/listTop"])
+        sample_row = {"创建时间": "2026-07-27 17:15:16"}   # 没有任何候选响应体，比不了内容
+        self.assertEqual("/api/vaWeb/system/country/list", sc.guess_list_api(sample_row=sample_row))
 
     def test_prefers_call_matching_page_url_business_word(self):
         sc = self._sc_with_calls(

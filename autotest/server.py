@@ -445,6 +445,18 @@ def api_run():
         cmd = [PY, "cli.py", "probe-lang", d, "--trigger", trigger]
         name = f"探测语言选项 {d}"
 
+    elif action == "redetect-list-api":
+        d = body.get("project", "")
+        if not d or "/" in d or "\\" in d:
+            return jsonify({"ok": False, "msg": "项目参数不合法"}), 400
+        if not P.load_project(d):
+            return jsonify({"ok": False, "msg": "项目不存在"}), 404
+        page = (body.get("page") or "").strip()
+        if not page:
+            return jsonify({"ok": False, "msg": "缺少页面名称"}), 400
+        cmd = [PY, "cli.py", "redetect-list-api", d, page]
+        name = f"重探接口 {d} · {page}"
+
     elif action == "scan":
         url = (body.get("url") or "").strip()
         if not re.match(r"^https?://", url):
