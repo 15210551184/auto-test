@@ -422,10 +422,28 @@ class PageScanner:
         return {"has_pagination": True, "total": int(m.group(1)) if m else None}
 
     def guess_list_api(self) -> Optional[str]:
-        """从捕获的请求里挑最像列表接口的那个，取路径片段"""
+        """
+        从捕获的请求里挑最像列表接口的那个，取路径片段。
+
+        按"最后出现"选有个坑：通知公告、未读消息角标这类全局小组件也会
+        打带 list 字样的接口（比如 /system/notice/listTop），而且往往是
+        定时轮询的，扫描全程耗时几秒到几十秒，轮询几次就会排到 api_calls
+        末尾，把真正这个页面的列表接口顶掉——选出来的 list_api 跟这页业务
+        毫无关系，执行时怎么等都等不到匹配的响应。
+
+        用页面自己的地址（如 /web/country/list）跟候选接口的路径比对有没有
+        共同的业务词（如 country）来纠偏：同名业务词命中的候选里选最后一个，
+        没有任何候选命中业务词（比如页面地址就是拼音/纯数字 ID，没法提取
+        英文业务词）就退回原来"直接选最后一个"的老办法，不引入新的误判。
+        """
         cands = [u for u in self.api_calls
                  if re.search(r"(list|page|query|search|find)", u, re.I)]
-        pick = cands[-1] if cands else (self.api_calls[-1] if self.api_calls else None)
+        if not cands:
+            pick = self.api_calls[-1] if self.api_calls else None
+        else:
+            page_words = _path_words(urlparse(getattr(self.page, "url", "") or "").path)
+            scored = [u for u in cands if page_words & _path_words(urlparse(u).path)]
+            pick = scored[-1] if scored else cands[-1]
         if not pick:
             return None
         path = urlparse(pick).path
@@ -882,6 +900,16 @@ def to_config(report: Dict[str, Any], name: Optional[str] = None,
 
 # 这些词单独出现时没有区分度，去掉它们后剩下的部分不足以认定匹配
 _WEAK = re.compile(r"(请输入|请选择|是否)")
+
+# 页面地址、接口路径里到处都有的通用词，不代表业务域，参与匹配只会
+# 让不相关的候选也"命中"，必须先剔除
+_LIST_API_STOPWORDS = {"list", "page", "query", "search", "find",
+                       "web", "api", "index", "home", "vaweb"}
+
+
+def _path_words(path: str) -> set:
+    """从 URL 路径里取小写英文单词集合，去掉通用词，剩下的当业务域标记"""
+    return set(re.findall(r"[a-z]+", path.lower())) - _LIST_API_STOPWORDS
 
 
 def _unique(values: List[str]) -> List[str]:

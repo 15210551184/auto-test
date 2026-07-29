@@ -335,5 +335,55 @@ class ProbeLanguageOptionsTests(unittest.TestCase):
         self.assertEqual(15, len(sc.probe_language_options(".lang-switch")))
 
 
+class GuessListApiTests(unittest.TestCase):
+    """
+    guess_list_api 原来直接挑 api_calls 里"最后一个"命中 list/page/query/
+    search/find 的 URL。真实事故：某系统全局通知公告小组件轮询
+    /system/notice/listTop，扫描一个跟通知毫无关系的页面（国家管理）时，
+    这条轮询请求排到了 api_calls 末尾，把真正的列表接口顶掉——生成的
+    list_api 配置执行时永远等不到匹配响应。
+    """
+
+    def _sc_with_calls(self, url, calls):
+        page = FakeMenuPage([[], []])
+        page.url = url
+        sc = PageScanner(page)
+        sc.api_calls = list(calls)
+        return sc
+
+    def test_prefers_call_matching_page_url_business_word(self):
+        sc = self._sc_with_calls(
+            "http://x.test/web/country/list",
+            ["http://x.test/api/vaWeb/system/country/list",
+             "http://x.test/api/vaWeb/system/notice/listTop"])
+        self.assertEqual("/api/vaWeb/system/country/list", sc.guess_list_api())
+
+    def test_polling_widget_after_real_call_no_longer_wins(self):
+        # 复现真实顺序：业务接口先打，通知轮询排在后面（甚至打好几次）
+        sc = self._sc_with_calls(
+            "http://x.test/web/country/list",
+            ["http://x.test/api/vaWeb/system/country/list",
+             "http://x.test/api/vaWeb/system/notice/listTop",
+             "http://x.test/api/vaWeb/system/notice/listTop"])
+        self.assertEqual("/api/vaWeb/system/country/list", sc.guess_list_api())
+
+    def test_no_business_word_overlap_falls_back_to_last_match(self):
+        # 页面地址提取不出业务词（比如纯拼音/ID），退回原来"选最后一个"
+        sc = self._sc_with_calls(
+            "http://x.test/web/1234",
+            ["http://x.test/api/foo/list", "http://x.test/api/bar/list"])
+        self.assertEqual("/api/bar/list", sc.guess_list_api())
+
+    def test_no_list_like_candidate_falls_back_to_last_call(self):
+        sc = self._sc_with_calls(
+            "http://x.test/web/country/list",
+            ["http://x.test/api/vaWeb/system/country/detail"])
+        self.assertEqual("/api/vaWeb/system/country/detail", sc.guess_list_api())
+
+    def test_no_calls_returns_none(self):
+        sc = self._sc_with_calls("http://x.test/web/country/list", [])
+        self.assertIsNone(sc.guess_list_api())
+
+
 if __name__ == "__main__":
     unittest.main()
