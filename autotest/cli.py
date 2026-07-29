@@ -127,11 +127,18 @@ def cmd_batch_scan(a):
 def cmd_batch_run(a):
     """批量执行勾选的页面"""
     out = _outdir(P._safe(a.project))
+    proj = P.load_project(a.project) or {}
     results = batch.run_selected(a.project, out, storage_state=a.state,
                                  only_tags=a.tags, exclude_tags=a.exclude_tags,
                                  concurrency=a.concurrency, target_language=a.lang)
     path = R.render(results, os.path.join(out, "report.html"))
     R.render_json(results, os.path.join(out, "result.json"))
+    lang_display = None
+    if a.lang:
+        lang_display = (proj.get("languages", {}).get("options", {}) or {}).get(a.lang, a.lang)
+    R.render_meta(os.path.join(out, "meta.json"), project=proj.get("name", a.project),
+                 page_count=len(results), only_tags=a.tags, exclude_tags=a.exclude_tags,
+                 language=a.lang, language_display=lang_display)
     print(f"报告: {os.path.abspath(path)}")
     sys.exit(1 if sum(r.failed for r in results) else 0)
 
@@ -145,6 +152,12 @@ def cmd_run(a):
                    target_language=a.lang)
     path = R.render([res], os.path.join(out, "report.html"))
     R.render_json([res], os.path.join(out, "result.json"))
+    lang_display = None
+    if a.lang:
+        lang_display = (cfg.languages.get("options", {}) or {}).get(a.lang, a.lang)
+    R.render_meta(os.path.join(out, "meta.json"), page_count=1,
+                 only_tags=a.tags, exclude_tags=a.exclude_tags,
+                 language=a.lang, language_display=lang_display)
     print(f"\n通过 {res.passed} / 失败 {res.failed} / 共 {len(res.cases)}")
     print(f"报告: {os.path.abspath(path)}")
     sys.exit(1 if res.failed else 0)

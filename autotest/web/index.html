@@ -60,6 +60,8 @@ header .sep{color:var(--line)}
   margin:0;display:flex;flex-direction:column;box-shadow:0 16px 48px rgba(0,0,0,.3)}
 .card.maximized .tree{flex:1;max-height:none}
 .card.maximized.term-card .term{flex:1;height:auto;min-height:0}
+.card.maximized>.body{flex:1;overflow-y:auto;min-height:0}
+.card.maximized #repWrap{flex:1;overflow-y:auto;min-height:0}
 .card{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);margin-bottom:16px}
 .card>h2{margin:0;padding:11px 15px;font-size:12px;font-weight:600;letter-spacing:.09em;
   text-transform:uppercase;color:var(--ink-3);border-bottom:1px solid var(--line);
@@ -189,7 +191,9 @@ details.exec-opts[open]>summary{border-bottom:1px solid var(--line)}
 .rep-item:last-child{border-bottom:none}
 .rep-item:hover{background:#f8fafc}
 .rep-row1{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:6px}
-.rep-time{font-size:12.5px;color:var(--ink-2);white-space:nowrap}
+.rep-name{font-size:12.5px;color:var(--ink);font-weight:500;overflow:hidden;
+  text-overflow:ellipsis;white-space:nowrap;min-width:0;flex:1}
+.rep-time-sub{font-size:11px;color:var(--ink-3);margin-bottom:5px}
 .rep-actions{display:flex;align-items:center;gap:8px;flex:0 0 auto}
 .rep-pages{font-size:11px;color:var(--ink-3);margin-top:5px;max-width:100%;
   overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -277,7 +281,7 @@ a.open:hover{text-decoration:underline}
   </div>
   <div class="col-right">
     <div class="card">
-      <h2>操作</h2>
+      <h2>操作<button class="icon-btn" type="button" id="btnMaxOps" style="margin-left:auto" title="放大到整屏">⤢</button></h2>
       <div class="body">
         <div class="step">
           <div class="step-h">1 · 扫描系统菜单</div>
@@ -335,7 +339,8 @@ a.open:hover{text-decoration:underline}
       </div>
     </div>
     <div class="card">
-      <h2>历史报告 <span class="count" id="repCount"></span></h2>
+      <h2>历史报告 <span class="count" id="repCount"></span>
+        <button class="icon-btn" type="button" id="btnMaxReports" style="margin-left:auto" title="放大到整屏">⤢</button></h2>
       <div id="repWrap"><div class="empty-state">还没有报告。</div></div>
     </div>
   </div>
@@ -443,6 +448,8 @@ function closeMaximized(){
 }
 $('#btnMaxTree').onclick=()=>setMaximized($('#btnMaxTree').closest('.card'));
 $('#btnMaxTerm').onclick=()=>setMaximized($('#btnMaxTerm').closest('.card'));
+$('#btnMaxOps').onclick=()=>setMaximized($('#btnMaxOps').closest('.card'));
+$('#btnMaxReports').onclick=()=>setMaximized($('#btnMaxReports').closest('.card'));
 $('#maximizeBackdrop').onclick=closeMaximized;
 document.addEventListener('keydown',e=>{if(e.key==='Escape')closeMaximized();});
 $('#projSel').onchange = loadProject;
@@ -750,10 +757,15 @@ async function loadReports(){
       result='<div class="tally">'+s+'</div><div class="bar"><i class="'+
              (r.failed?'has-fail':'')+'" style="width:100%;--w:'+pct+'%"></i></div>';
     }
-    h+='<div class="rep-item"><div class="rep-row1"><span class="rep-time">'+r.time+'</span>'+
+    // label 是"5 个页面 · 冒烟+搜索筛选 · English"这种一句话摘要，跑批量/
+    // 单页执行时才会写（见 cli.py 的 render_meta）；老报告没有这份 meta.json，
+    // 退回只显示时间戳，不因为缺文件报错或者显示空白。
+    const heading = r.label ? esc(r.label) : r.time;
+    const subtime = r.label ? '<div class="rep-time-sub">'+r.time+'</div>' : '';
+    h+='<div class="rep-item"><div class="rep-row1"><span class="rep-name" title="'+esc(r.label||r.time)+'">'+heading+'</span>'+
        '<div class="rep-actions"><a class="open" href="'+r.url+'" target="_blank">查看</a>'+
        '<button class="danger sm" type="button" data-rep-del="'+esc(r.dir)+'">删除</button></div></div>'+
-       result+pageSummaryHtml(r.pages)+'</div>';
+       subtime+result+pageSummaryHtml(r.pages)+'</div>';
   });
   $('#repWrap').innerHTML=h;
   $('#repWrap').querySelectorAll('[data-rep-del]').forEach(btn=>{

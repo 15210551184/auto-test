@@ -312,7 +312,19 @@ def list_reports(limit=50):
             continue
         item = {"dir": d.name, "url": f"/reports/{d.name}/report.html",
                 "time": tz.from_ts(d.stat().st_mtime).strftime("%Y-%m-%d %H:%M"),
-                "passed": None, "failed": None, "total": None, "pages": []}
+                "passed": None, "failed": None, "total": None, "pages": [],
+                "label": None, "tags": [], "language_display": None}
+        # meta.json 记的是执行时的上下文（勾了哪些类别、选了哪种语言）——
+        # 老报告没有这个文件，读不到就是 None，前端退回只显示时间戳。
+        mj = d / "meta.json"
+        if mj.exists():
+            try:
+                meta = json.loads(mj.read_text(encoding="utf-8")) or {}
+                item["label"] = meta.get("label")
+                item["tags"] = meta.get("tags") or []
+                item["language_display"] = meta.get("language_display")
+            except Exception:
+                pass
         # 从 result.json 读汇总，读不到就只显示时间
         rj = d / "result.json"
         if rj.exists():

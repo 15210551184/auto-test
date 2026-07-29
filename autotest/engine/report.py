@@ -2,10 +2,17 @@
 import html
 import json
 import os
-from typing import List
+from typing import List, Optional
 
 from . import tz
 from .models import PageResult, Status
+
+# 跟 web/index.html 里"只执行勾选的类别"复选框的中文标签保持一致——
+# 报告名称里要用人话显示勾了哪些类别，不能只甩 tag 的英文代号。
+TAG_LABELS = {
+    "smoke": "冒烟", "health": "健康检查", "search": "搜索筛选",
+    "list": "列表分页", "export": "导出", "crud": "新增/修改/删除", "i18n": "多语言",
+}
 
 CSS = """
 *{box-sizing:border-box}
@@ -160,4 +167,41 @@ def render_json(results: List[PageResult], out_path: str) -> str:
     data = [asdict(r) for r in results]
     with open(out_path, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2, default=str)
+    return out_path
+
+
+def build_run_label(page_count: int, only_tags: Optional[List[str]] = None,
+                    language_display: Optional[str] = None) -> str:
+    """
+    给历史报告列表用的一句话摘要：跑了几个页面、勾了哪些类别、选了哪种
+    语言——列表里不用点开报告、只看这一行就知道这份报告测的是什么，
+    不用只靠一个时间戳去猜"这次是不是跑了全部类别"。
+    """
+    parts = [f"{page_count} 个页面"]
+    parts.append("+".join(TAG_LABELS.get(t, t) for t in only_tags) if only_tags else "全部类别")
+    parts.append(language_display or "默认语言")
+    return " · ".join(parts)
+
+
+def render_meta(out_path: str, *, project: Optional[str] = None, page_count: int = 0,
+                only_tags: Optional[List[str]] = None, exclude_tags: Optional[List[str]] = None,
+                language: Optional[str] = None, language_display: Optional[str] = None) -> str:
+    """
+    执行时的上下文（勾了哪些类别、选了哪种语言）单独存一份，不塞进
+    result.json——那份文件的结构是"页面执行结果列表"，server.py 的
+    list_reports() 已经在按这个结构读，加运行参数进去要么破坏现有结构，
+    要么另包一层拖累所有读它的地方。历史报告列表要显示"这份报告测了
+    什么"，只需要额外读一下这份小文件；读不到就是没有这份文件的旧报告，
+    前端退回只显示时间戳的老样子，不会因为文件缺失而报错。
+    """
+    meta = {
+        "project": project,
+        "tags": only_tags or [],
+        "exclude_tags": exclude_tags or [],
+        "language": language,
+        "language_display": language_display,
+        "label": build_run_label(page_count, only_tags, language_display),
+    }
+    with open(out_path, "w", encoding="utf-8") as f:
+        json.dump(meta, f, ensure_ascii=False, indent=2)
     return out_path
