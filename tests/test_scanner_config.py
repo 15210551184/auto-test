@@ -295,5 +295,47 @@ class MultiLanguageConfigTests(unittest.TestCase):
         self.assertNotIn("多语言检查", names)
 
 
+class ExportColumnCoverageTests(unittest.TestCase):
+    """
+    真实事故：导出用例的字段值比对只截了前 5 个"符合类型"的列去比，某页面
+    第 7 列"加盟商"导出的是内部 ID、页面显示的是名称——这个真实的数据映射
+    错误正是值比对该抓的，但因为排在第 5 列之后，从来没被比过，报告上
+    「抽样比对 N 个字段一致」看着全绿，其实这一列从没被检查过。字段值比对
+    是纯字符串比较，没有理由只挑前几列，能比的类型全部都该比。
+    """
+
+    def _report_with_columns(self, headers, column_types):
+        return {
+            "url": "http://x.test/web/driver",
+            "title": "司机审核管理",
+            "form_fields": [],
+            "table": {"headers": headers, "row_count": 5,
+                      "column_types": column_types, "sample_row": {}},
+            "buttons": {"export": True},
+            "pagination": {},
+            "list_api": None,
+        }
+
+    def test_all_eligible_columns_are_compared_not_just_first_five(self):
+        headers = ["序号", "国家", "城市", "司机头像", "司机姓名", "司机手机号",
+                  "车牌号", "VIN码", "加盟商", "审核状态", "发起时间", "操作"]
+        column_types = {h: "text" for h in headers}
+        column_types["司机头像"] = "unknown"   # 图片列，天然排除
+        report = self._report_with_columns(headers, column_types)
+
+        cfg = scanner.to_config(report)
+        export_case = next(c for c in cfg["cases"] if c["name"] == "导出数据验证")
+        step = next(s["export_and_verify"] for s in export_case["steps"]
+                   if "export_and_verify" in s)
+
+        # 第 7 个才轮到的"加盟商"必须在比对列表里，不能因为排在第 5 个之后被截掉
+        self.assertIn("加盟商", step["columns"])
+        # 序号/操作/图片列该排除的还是要排除
+        self.assertNotIn("序号", step["columns"])
+        self.assertNotIn("操作", step["columns"])
+        self.assertNotIn("司机头像", step["columns"])
+        self.assertEqual(9, len(step["columns"]))   # 12 列去掉 3 个排除的
+
+
 if __name__ == "__main__":
     unittest.main()

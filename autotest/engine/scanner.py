@@ -879,8 +879,13 @@ def to_config(report: Dict[str, Any], name: Optional[str] = None,
 
     # 8. 导出
     if btns.get("export"):
+        # 之前这里截了前 5 列（[:5]），真实事故：某页面第 7 列"加盟商"导出的是
+        # 内部 ID、页面上显示的是名称——这种"导出字段值本身就映射错了"的问题
+        # 正是这条值比对该抓的，但因为排在第 5 列之后，从来没被比过，「抽样比对
+        # N 个字段一致」看着全绿，实际上从没检查过这一列。字段值比对是纯字符串
+        # 比较，几十列也没有明显开销，没有理由只挑排在前面的几列，能比的全比。
         cmp_cols = [h for h in headers if h not in ("序号", "操作", "图片")
-                    and ctypes.get(h) in ("money", "date", "phone", "text")][:5]
+                    and ctypes.get(h) in ("money", "date", "phone", "text")]
         cases.append({"name": "导出数据验证", "tags": ["export"], "steps": [
             {"search": None},
             {"capture": "page_data"},
