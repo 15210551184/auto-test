@@ -27,10 +27,18 @@ border:1px solid #e6e8eb}
 .card .n{font-size:26px;font-weight:600;line-height:1.2}
 .card .l{font-size:12px;color:#8a9099;margin-top:2px}
 .pass .n{color:#00a870}.fail .n{color:#e34d59}.skip .n{color:#bbc0c6}.warn .n{color:#e6a23c}
+.toolbar{display:flex;gap:8px;margin-bottom:14px}
+.toolbar button{font:500 12px/1 inherit;padding:7px 12px;border-radius:6px;cursor:pointer;
+border:1px solid #dde1e6;background:#fff;color:#4b5158}
+.toolbar button:hover{background:#f5f6f8}
 .page{background:#fff;border:1px solid #e6e8eb;border-radius:8px;margin-bottom:16px;
 overflow:hidden}
-.page>h2{font-size:15px;margin:0;padding:14px 18px;border-bottom:1px solid #eef0f2}
-.page>h2 a{color:#8a9099;font-weight:400;font-size:12px;text-decoration:none;margin-left:8px}
+.page>summary{font-size:15px;margin:0;padding:14px 18px;border-bottom:1px solid #eef0f2;
+cursor:pointer;list-style:none;display:flex;align-items:center}
+.page>summary::-webkit-details-marker{display:none}
+.page>summary::before{content:'▸';display:inline-block;width:14px;color:#8a9099;font-size:12px}
+.page[open]>summary::before{content:'▾'}
+.page>summary a{color:#8a9099;font-weight:400;font-size:12px;text-decoration:none;margin-left:8px}
 .case{border-bottom:1px solid #f0f2f4}
 .case:last-child{border-bottom:none}
 .case>summary{padding:11px 18px;cursor:pointer;display:flex;align-items:center;
@@ -130,11 +138,16 @@ def render(results: List[PageResult], out_path: str) -> str:
 <div class="card warn"><div class="n">{warned}</div><div class="l">其中有警告</div></div>
 <div class="card"><div class="n">{(passed/total*100 if total else 0):.0f}%</div>
 <div class="l">通过率</div></div>
+</div>
+<div class="toolbar">
+<button type="button" onclick="document.querySelectorAll('details').forEach(d=>d.open=true)">全部展开</button>
+<button type="button" onclick="document.querySelectorAll('details').forEach(d=>d.open=false)">全部收起</button>
 </div>"""]
 
     for pr in results:
-        parts.append(f'<div class="page"><h2>{html.escape(pr.name)}'
-                     f'<a href="{html.escape(pr.url)}" target="_blank">{html.escape(pr.url)}</a></h2>')
+        parts.append(f'<details class="page" open><summary>{html.escape(pr.name)}'
+                     f'<a href="{html.escape(pr.url)}" target="_blank" '
+                     f'onclick="event.stopPropagation()">{html.escape(pr.url)}</a></summary>')
         for c in pr.cases:
             openattr = " open" if c.status in (Status.FAIL, Status.ERROR) else ""
             parts.append(f'<details class="case"{openattr}><summary>{_badge(c.status)}'
@@ -153,7 +166,7 @@ def render(results: List[PageResult], out_path: str) -> str:
             parts.append("</div>")
             parts.append(_api_log_html(c.api_calls))
             parts.append("</details>")
-        parts.append("</div>")
+        parts.append("</details>")
 
     parts.append("</div></body></html>")
     os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)

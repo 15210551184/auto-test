@@ -86,5 +86,35 @@ class RenderIncludesApiLogTests(unittest.TestCase):
             self.assertIn("[已隐藏]", text)
 
 
+class CollapsibleReportTests(unittest.TestCase):
+    """
+    页面区块（跟用例一样）现在也是 <details>，能收起/展开；顶部有
+    "全部展开"/"全部收起"按钮一次性切换所有 details（页面级 + 用例级）。
+    """
+
+    def _render(self):
+        with tempfile.TemporaryDirectory() as d:
+            out = Path(d) / "report.html"
+            case = CaseResult("列表默认加载", Status.PASS,
+                              [StepResult("assert_row_count", {}, Status.PASS)])
+            render([PageResult("国家管理", "http://x.test/country", [case])], str(out))
+            return out.read_text(encoding="utf-8")
+
+    def test_page_section_is_a_details_element(self):
+        text = self._render()
+        self.assertIn('<details class="page" open><summary>国家管理', text)
+
+    def test_toolbar_has_expand_and_collapse_all_buttons(self):
+        text = self._render()
+        self.assertIn("全部展开", text)
+        self.assertIn("全部收起", text)
+        self.assertIn("document.querySelectorAll('details')", text)
+
+    def test_page_link_click_does_not_toggle_collapse(self):
+        # 点页面标题里的链接应该只是跳转，不应该顺带把这个 <details> 收起来
+        text = self._render()
+        self.assertIn('onclick="event.stopPropagation()"', text)
+
+
 if __name__ == "__main__":
     unittest.main()
