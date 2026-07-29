@@ -702,20 +702,25 @@ def to_config(report: Dict[str, Any], name: Optional[str] = None,
         col = _match_column(label, headers)
         steps = []
         dep = f.get("depends_on")
-        name = f"筛选-{label}"
+        # 这个用例名字用的局部变量绝不能叫 name——to_config() 自己的
+        # 形参也叫 name（页面名字），for 循环不会开新作用域，同名局部变量
+        # 会直接把形参覆盖掉，导致函数末尾 cfg["name"] 拿到的是"最后一个
+        # 下拉筛选用例的名字"而不是页面名字（真实出现过的 bug：页面配置
+        # 文件的 name: 字段变成了"筛选-状态"这种用例名）。
+        case_name = f"筛选-{label}"
         if dep:
             # 级联下拉：这个字段没选父级就是 disabled 的，扫描时已经验证过
             # "先选父级再选它"能测出选项——生成的用例把这一步补上，不然
             # 执行时一样会点在一个不可交互的元素上。
             steps.append({"select": {"label": dep["label"], "option": dep["option"]}})
             steps.append({"wait": 500})
-            name = f"筛选-{label}（联动{dep['label']}）"
+            case_name = f"筛选-{label}（联动{dep['label']}）"
         steps.append({"check_select_options": {"label": label}})
         if col:
             # 循环后 ${selected_label} 停在最后一个选项，据此校验列值
             steps.append({"assert_column_all": {"column": col,
                                                 "equals": "${selected_%s}" % label}})
-        cases.append({"name": name, "tags": ["search"], "steps": steps})
+        cases.append({"name": case_name, "tags": ["search"], "steps": steps})
 
     # 4. 日期范围
     for f in fields:

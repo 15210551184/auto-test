@@ -28,6 +28,10 @@ def _all_actions(cfg):
     return [a for c in cfg["cases"] for step in c["steps"] for a in step.keys()]
 
 
+def _all_names(cfg):
+    return [c["name"] for c in cfg["cases"]]
+
+
 class ToConfigPhase1Tests(unittest.TestCase):
     def setUp(self):
         self.report = {
@@ -53,6 +57,19 @@ class ToConfigPhase1Tests(unittest.TestCase):
         smoke = next(c for c in cfg["cases"] if c["name"] == "列表默认加载")
         actions = [a for s in smoke["steps"] for a in s.keys()]
         self.assertIn("assert_no_render_garbage", actions)
+
+    def test_page_name_is_not_clobbered_by_select_filter_case_name(self):
+        # 真实事故：to_config() 内部生成"筛选-状态"这类下拉筛选用例时，曾经
+        # 用了一个也叫 name 的局部变量，把传进来的页面名字形参覆盖掉——
+        # 页面配置文件的 name: 字段变成了用例名。self.report 里正好有一个
+        # 带 options 的 select 字段（"状态"），是复现这个 bug 的最小场景。
+        cfg = scanner.to_config(self.report, name="国家管理")
+        self.assertEqual("国家管理", cfg["name"])
+
+    def test_select_filter_case_name_unaffected(self):
+        # 顺带确认修复没有把用例名字本身搞错
+        cfg = scanner.to_config(self.report, name="国家管理")
+        self.assertIn("筛选-状态", _all_names(cfg))
 
     def test_button_patrol_case_generated(self):
         cfg = scanner.to_config(self.report)
