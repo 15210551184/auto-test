@@ -31,14 +31,30 @@ class ScanTimeoutBudgetTests(unittest.TestCase):
     def test_languages_without_options_uses_base_timeout(self):
         self.assertEqual(SCAN_TIMEOUT_SEC, _scan_timeout_for({"switcher_trigger": ".lang"}))
 
-    def test_budget_scales_with_language_count(self):
+    def test_options_without_scan_languages_uses_base_timeout(self):
+        # options 配了要给运行时切换用的语言，但没勾选 scan_languages ——
+        # 扫描阶段根本不会为它们多切语言，预算不该多加。
         languages = {"switcher_trigger": ".lang",
                     "options": {"zh": "中文", "en": "English", "fr": "Français", "ar": "阿拉伯语"}}
+        self.assertEqual(SCAN_TIMEOUT_SEC, _scan_timeout_for(languages))
+
+    def test_budget_scales_with_scan_languages_count(self):
+        languages = {"switcher_trigger": ".lang",
+                    "options": {"zh": "中文", "en": "English", "fr": "Français", "ar": "阿拉伯语"},
+                    "scan_languages": ["zh", "en", "fr", "ar"]}
         expected = SCAN_TIMEOUT_SEC + 4 * LANG_SCAN_BUDGET_SEC
         self.assertEqual(expected, _scan_timeout_for(languages))
 
+    def test_budget_only_counts_scan_languages_subset(self):
+        # options 里有 4 种语言，但只勾了 2 种去扫——预算只按这 2 种给。
+        languages = {"switcher_trigger": ".lang",
+                    "options": {"zh": "中文", "en": "English", "fr": "Français", "ar": "阿拉伯语"},
+                    "scan_languages": ["en", "fr"]}
+        expected = SCAN_TIMEOUT_SEC + 2 * LANG_SCAN_BUDGET_SEC
+        self.assertEqual(expected, _scan_timeout_for(languages))
+
     def test_custom_base_timeout_respected(self):
-        languages = {"options": {"en": "English"}}
+        languages = {"options": {"en": "English"}, "scan_languages": ["en"]}
         self.assertEqual(200 + LANG_SCAN_BUDGET_SEC, _scan_timeout_for(languages, base=200))
 
 

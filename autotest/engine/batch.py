@@ -70,12 +70,13 @@ def _log(cb, msg):
 
 def _scan_timeout_for(languages: Optional[Dict], base: int = SCAN_TIMEOUT_SEC) -> int:
     """
-    配了几种语言，就多给几份 LANG_SCAN_BUDGET_SEC——scan_language_variants()
-    会为每种语言切一次、重新扫一遍表单/表头/弹窗字段，这部分开销跟语言数量
-    成正比，超时预算也该跟着成正比，不能让所有页面（不管配没配多语言）
-    共用同一个只按"普通页面"估的固定上限。
+    实际会扫几种语言（languages.scan_languages，不是 options 里配置了几种
+    "可切换的"语言），就多给几份 LANG_SCAN_BUDGET_SEC——scan_language_
+    variants() 只会为 scan_languages 里列出的语言切一次、重新扫一遍表单/
+    表头/弹窗字段，没配 scan_languages 就完全不做这部分，超时预算也该
+    照实际会不会做、做几次来给，按 options 的语言总数给会白白多留预算。
     """
-    lang_count = len((languages or {}).get("options") or {})
+    lang_count = len((languages or {}).get("scan_languages") or [])
     return base + lang_count * LANG_SCAN_BUDGET_SEC
 
 

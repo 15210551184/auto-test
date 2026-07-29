@@ -460,10 +460,23 @@ class PageScanner:
 
         没配 languages.switcher_trigger/options 就是单语言页面，直接返回
         空字典——不强求每个项目都配多语言。
+
+        languages.scan_languages 决定"扫哪几种"，不给（或空列表）就只用
+        默认语言扫出来的文案，不做多语言合并——每多扫一种语言就要重新
+        切一次语言、重新扫一遍表单/表头/新增弹窗字段，字段多、弹窗复杂
+        的页面这个开销不小（新增弹窗字段一多，光这部分就能占大半个扫描
+        预算），不是所有页面都值得为多语言健壮性买这份单，交给项目自己
+        按页面权衡：想要哪几种语言的健壮性就配哪几种，不配就是"只扫默认
+        语言、越快越好"。这跟 languages.options（运行时能切到的全部语言，
+        执行时选语言、"多语言检查"用例遍历翻译正确性都还是用它，不受
+        scan_languages 影响）是两回事。
         """
         label_variants: Dict[str, Dict[str, str]] = {}
         header_variants: Dict[str, Dict[str, str]] = {}
         if not (languages and languages.get("switcher_trigger") and languages.get("options")):
+            return label_variants, header_variants
+        scan_langs = languages.get("scan_languages")
+        if not scan_langs:
             return label_variants, header_variants
 
         canonical_labels = [f["label"] for f in report.get("form_fields", [])]
@@ -472,7 +485,7 @@ class PageScanner:
                                    (report.get("create_form") or {}).get("fields", [])]
         has_create = report.get("buttons", {}).get("create", False)
 
-        for code in languages["options"]:
+        for code in scan_langs:
             if not self.switch_language(languages, code):
                 continue
             _merge_positional(label_variants, canonical_labels,

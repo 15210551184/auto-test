@@ -357,12 +357,15 @@ else:
 `concurrency` 个页面并发扫描（默认 2，跟 `run_selected()` 一样，不需要
 `run_selected()` 那套"先登录一次共享 cookie"的协调——多个 worker 同时读
 同一份 cookie 文件没有写冲突，直接各自起独立的 `sync_playwright()` 会话
-并发跑即可）。单页扫描的硬超时（`SCAN_TIMEOUT_SEC`，默认 150s）按项目配的
-语言数量成正比增加（`_scan_timeout_for()`，每种语言多给 `LANG_SCAN_
-BUDGET_SEC`=30s）——配了多语言的项目，`scan_language_variants()` 会为
-每种语言切一次、重新扫一遍表单/表头/弹窗字段，纯 CRUD 页面也会因为这部分
-多花不少时间，所有页面共用同一个只按"不带多语言"估的固定上限会导致
-配了语言的项目大批量假性超时。
+并发跑即可）。单页扫描的硬超时（`SCAN_TIMEOUT_SEC`，默认 150s）按
+`languages.scan_languages`（不是 `options`，见 4.7）的语言数量成正比
+增加（`_scan_timeout_for()`，每种语言多给 `LANG_SCAN_BUDGET_SEC`=30s）
+——配了 `scan_languages` 的项目，`scan_language_variants()` 会为里面
+列出的每种语言切一次、重新扫一遍表单/表头/弹窗字段，纯 CRUD 页面也会
+因为这部分多花不少时间，所有页面共用同一个只按"不带多语言"估的固定
+上限会导致配了 `scan_languages` 的项目大批量假性超时；没配
+`scan_languages` 的项目（哪怕 `options` 配了好几种语言）不会多花这部分
+时间，也就不加预算。
 
 **个别页面单独调超时**：级联下拉一多（国家→城市→加盟商这种多级依赖）、
 "新增"弹窗字段特别多、或者带地图选点这类控件的页面，扫描本来就比一般
@@ -664,6 +667,41 @@ canonical 展开成"所有已知文案"给 Playwright 定位元素用（哪个�
 字段 label（只取文案，不重复探测类型/选项，避免副作用），按 DOM 位置
 和默认语言那次的结果对齐——位置数量对不上就整批跳过，宁可缺失也不
 错配（`_merge_positional`）。
+
+**`scan_languages`——扫描时值不值得为多语言健壮性买单，交给项目自己
+选**：`options` 是运行时能切到的全部语言（执行时选语言、"多语言检查"
+用例遍历翻译正确性都用它），跟"扫描时要不要为每种语言重新扫一遍
+label/表头/弹窗字段"是两件事——后者才是真正费时间的部分：字段多、
+弹窗复杂的页面，多扫一种语言就要多切一次语言、多扫一遍表单/表头/新增
+弹窗，扫描预算能被吃掉一大半。不是所有页面都需要这份健壮性（有些页面
+根本没打算切语言测，或者字段简单到不容易错配），所以默认不扫：
+
+```yaml
+languages:
+  switcher_trigger: ".lang-switch"
+  options: {zh: 中文, en: English, fr: Français, ar: 阿拉伯语}   # 运行时可切的全部语言
+  scan_languages: [en, fr]   # 扫描时只为这两种语言合并 label_variants/header_variants；不配就一种都不扫
+```
+
+不配 `scan_languages`（或配成空列表）——`scan_language_variants()` 直接
+返回空字典，不切语言、不重扫，`label_variants`/`header_variants` 都是
+空的（`switch_language`/`assert_no_i18n_leak` 等运行时功能不受影响，
+只是丢失了"表单 label 按位置自动跟译文对齐"这份健壮性，多语言页面下
+`fill`/`select` 等动作如果用的是默认语言文案以外的写法就可能定位不到
+元素）。`scan_languages` 可以是 `options` 的子集，只为列出来的语言重扫，
+其余语言不碰。
+
+**这是一次默认行为变化**：改之前，只要项目配了 `languages.options`，
+扫描时会为 *全部* 语言重扫一遍；改之后，不显式配 `scan_languages`
+就完全不扫，速度更快但默认丢了多语言 label/表头健壮性——已有项目想
+保留原来的效果，需要在 `project.yaml`（或具体页面配置）里把 `options`
+里想要健壮性的语言列进 `scan_languages`。
+
+`batch.scan_selected()` 的超时预算（见 4.1）也是照 `scan_languages` 的
+数量而不是 `options` 的数量来加，理由一样：只有列进 `scan_languages`
+的语言才会真的多切一次语言、多扫一遍，预算照实际会不会做、做几次来
+给，照 `options` 给会白白多留预算，也会让"该超时的没超时"的判断变得
+不准。
 
 **执行时选语言**：`run_page`/`batch.run_selected` 新增 `target_language`
 参数，选了之后每条用例重新导航到页面后、跑自己的步骤之前，会先用

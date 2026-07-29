@@ -83,7 +83,8 @@ class ScanLanguageVariantsOrchestrationTests(unittest.TestCase):
             "table": {"headers": ["国家", "状态"]},
             "buttons": {"create": False},
         }
-        languages = {"switcher_trigger": ".lang", "options": {"en": "English"}}
+        languages = {"switcher_trigger": ".lang", "options": {"en": "English"},
+                    "scan_languages": ["en"]}
 
         self.sc.switch_language = lambda langs, code: True
         self.sc.scan_form_labels = lambda: ["Country", "Status"]
@@ -100,7 +101,8 @@ class ScanLanguageVariantsOrchestrationTests(unittest.TestCase):
             "buttons": {"create": False},
         }
         languages = {"switcher_trigger": ".lang",
-                    "options": {"en": "English", "fr": "Français"}}
+                    "options": {"en": "English", "fr": "Français"},
+                    "scan_languages": ["en", "fr"]}
         attempted = []
 
         def fake_switch(langs, code):
@@ -122,7 +124,8 @@ class ScanLanguageVariantsOrchestrationTests(unittest.TestCase):
             "buttons": {"create": True},
             "create_form": {"fields": [{"label": "名称"}, {"label": "备注"}]},
         }
-        languages = {"switcher_trigger": ".lang", "options": {"en": "English"}}
+        languages = {"switcher_trigger": ".lang", "options": {"en": "English"},
+                    "scan_languages": ["en"]}
 
         self.sc.switch_language = lambda langs, code: True
         self.sc.scan_form_labels = lambda: []
@@ -139,7 +142,8 @@ class ScanLanguageVariantsOrchestrationTests(unittest.TestCase):
             "buttons": {"create": False},
             "create_form": {},
         }
-        languages = {"switcher_trigger": ".lang", "options": {"en": "English"}}
+        languages = {"switcher_trigger": ".lang", "options": {"en": "English"},
+                    "scan_languages": ["en"]}
 
         self.sc.switch_language = lambda langs, code: True
         self.sc.scan_form_labels = lambda: []
@@ -150,6 +154,50 @@ class ScanLanguageVariantsOrchestrationTests(unittest.TestCase):
         self.sc.scan_dialog_labels = boom
 
         self.sc.scan_language_variants(languages, report)   # 不应抛异常
+
+    def test_options_without_scan_languages_returns_empty(self):
+        # options 配了运行时可切换的语言，但没勾 scan_languages ——
+        # 扫描阶段默认不做任何多语言合并，且不应调用 switch_language。
+        report = {
+            "form_fields": [{"label": "国家"}],
+            "table": {"headers": ["状态"]},
+            "buttons": {"create": False},
+        }
+        languages = {"switcher_trigger": ".lang",
+                    "options": {"en": "English", "fr": "Français"}}
+
+        def boom(langs, code):
+            raise AssertionError("没配 scan_languages 不该切语言")
+        self.sc.switch_language = boom
+
+        label_v, header_v = self.sc.scan_language_variants(languages, report)
+        self.assertEqual({}, label_v)
+        self.assertEqual({}, header_v)
+
+    def test_only_scan_languages_subset_is_scanned(self):
+        # options 有 3 种语言，scan_languages 只勾了其中 1 种——
+        # 只应该为这一种切语言，其余两种不该被 switch_language 碰到。
+        report = {
+            "form_fields": [{"label": "国家"}],
+            "table": {"headers": []},
+            "buttons": {"create": False},
+        }
+        languages = {"switcher_trigger": ".lang",
+                    "options": {"en": "English", "fr": "Français", "ar": "阿拉伯语"},
+                    "scan_languages": ["fr"]}
+        attempted = []
+
+        def fake_switch(langs, code):
+            attempted.append(code)
+            return True
+
+        self.sc.switch_language = fake_switch
+        self.sc.scan_form_labels = lambda: ["Pays"]
+        self.sc.scan_table_headers = lambda: []
+
+        label_v, _ = self.sc.scan_language_variants(languages, report)
+        self.assertEqual(["fr"], attempted)
+        self.assertEqual({"国家": {"fr": "Pays"}}, label_v)
 
 
 class ToConfigPropagatesVariantsTests(unittest.TestCase):
