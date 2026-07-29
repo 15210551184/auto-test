@@ -7,6 +7,8 @@
 import re
 from typing import Any, Callable, Dict, List
 
+from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
+
 from . import datafactory as DF
 from . import normalize as N
 from .i18n_terms import words as _i18n_words
@@ -126,17 +128,32 @@ def do_wait_api(ctx, url: str = None, value: str = None, timeout: int = 15000, *
 
 @action("search")
 def do_search(ctx, **kw):
-    """点搜索 + 等接口，合成一步，配置里最常用"""
+    """
+    点搜索 + 等接口，合成一步，配置里最常用。
+
+    批量执行默认并发跑多个页面，同一时间好几个 Chromium 一起打同一个后端，
+    接口响应会比单独手动测慢一截，个别请求偶尔会卡过超时线——接口本身没
+    问题，纯粹是那一刻凑巧撞上了并发高峰。超时先重试一次（等一拍再点一次
+    搜索），大概率第二次就赶上峰值过去了；两次都超时才是真的该报的问题。
+    超时时长可以在页面配置里用 search_timeout（毫秒）单独调，默认 30s。
+    """
     frag = ctx.config.list_api
     btn = ctx.selector("search_btn")
+    timeout = ctx.config.search_timeout
     if frag:
-        # 批量执行默认并发跑多个页面，同一时间好几个 Chromium 一起打同一个
-        # 后端，接口响应会比单独手动测慢一截——20s 在并发下偶尔差一点点
-        # 就超时（实测卡在 21~22s），接口本身不慢，纯粹是等的时间不够留余量。
-        with ctx.page.expect_response(
-            lambda r: frag in r.url and r.status == 200, timeout=30000
-        ) as info:
-            ctx.page.locator(btn).first.click()
+        retried = False
+        for attempt in range(2):
+            try:
+                with ctx.page.expect_response(
+                    lambda r: frag in r.url and r.status == 200, timeout=timeout
+                ) as info:
+                    ctx.page.locator(btn).first.click()
+                break
+            except PlaywrightTimeoutError:
+                if attempt == 1:
+                    raise
+                retried = True
+                ctx.page.wait_for_timeout(800)   # 给并发高峰一点时间过去，再重试
         try:
             ctx.last_api = info.value.json()
         except Exception:
@@ -144,8 +161,9 @@ def do_search(ctx, **kw):
     else:
         ctx.page.locator(btn).first.click()
         ctx.page.wait_for_timeout(1500)
+        retried = False
     ctx.page.wait_for_timeout(400)
-    return "执行搜索"
+    return "执行搜索（重试后成功）" if retried else "执行搜索"
 
 
 # ============ 第一期：全自动健康巡检 ============

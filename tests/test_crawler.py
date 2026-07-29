@@ -8,6 +8,7 @@ if "playwright.sync_api" not in sys.modules:
     playwright = types.ModuleType("playwright")
     sync_api = types.ModuleType("playwright.sync_api")
     sync_api.Page = object
+    sync_api.TimeoutError = type('TimeoutError', (Exception,), {})
     sync_api.sync_playwright = object()
     playwright.sync_api = sync_api
     sys.modules["playwright"] = playwright

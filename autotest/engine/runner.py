@@ -30,6 +30,14 @@ DEFAULT_SELECTORS = {
     "submit_btn": ".el-dialog:visible .el-button--primary",
 }
 
+# 接口调用记录里要替换掉的请求头——这些是登录凭证本身，报告是会被保存、
+# 分享、甚至提交进仓库的文件，原样记进去等于把会话令牌写进一份不受权限
+# 控制的静态文件里，比截图暴露业务数据严重得多。
+_REDACT_HEADERS = {"cookie", "authorization", "set-cookie", "x-token", "token", "x-auth-token"}
+# 单条用例最多记这么多条接口调用，避免一条用例里循环点了几十次搜索
+# （比如 check_select_options）把报告文件撑得很大。
+_API_LOG_LIMIT = 50
+
 
 class Context:
     """一次页面执行的上下文，贯穿所有 step"""
@@ -49,6 +57,11 @@ class Context:
         self.last_api: Optional[dict] = None
         self.console_errors: List[str] = []
         self.failed_requests: List[str] = []
+        # 这条用例触发的接口调用（方法/URL/状态码/耗时/入参/响应），随
+        # reset_signals() 按用例清空，run_case 跑完整条用例后存进 CaseResult，
+        # 供报告里查"这条用例到底打了哪些接口、传了什么、返回了什么"。
+        self.api_log: List[Dict[str, Any]] = []
+        self._req_start: Dict[Any, float] = {}
         self.out_dir = out_dir
         # report_root：截图相对路径要相对谁计算——单页执行时 report.html 就写
         # 在 out_dir 里，两者相同；批量执行时每个页面各有自己的子目录
@@ -68,8 +81,7 @@ class Context:
         self.page.on("console", lambda m: (
             self.console_errors.append(f"{m.type}: {m.text[:200]}")
             if m.type == "error" else None))
-        self.page.on("requestfailed", lambda r:
-                     self.failed_requests.append(f"{r.method} {r.url[:120]}"))
+        self.page.on("requestfailed", self._on_request_failed)
         # 原来只记 5xx，4xx（比如图片链接挂了返回 404）完全漏记。
         # 控制台报错里的"Failed to load resource: 404"不带 URL，光看那条消息
         # 猜不出是哪个资源坏的；这里记下来，assert_no_failed_request 能报出
@@ -77,6 +89,51 @@ class Context:
         self.page.on("response", lambda r:
                      self.failed_requests.append(f"{r.status} {r.url[:160]}")
                      if r.status >= 400 else None)
+        self.page.on("request", lambda r: self._req_start.__setitem__(r, time.time()))
+        self.page.on("response", self._on_api_response)
+
+    def _on_request_failed(self, request):
+        self.failed_requests.append(f"{request.method} {request.url[:120]}")
+        self._req_start.pop(request, None)   # 请求没等到响应，不留在字典里占地方
+
+    def _on_api_response(self, resp):
+        """接口调用记录：只挑 JSON 响应（业务接口的典型特征），静态资源
+        （图片/字体/js/css）都不是这个 content-type，天然被过滤掉。"""
+        req = resp.request
+        start = self._req_start.pop(req, None)
+        try:
+            ct = (resp.headers or {}).get("content-type", "")
+        except Exception:
+            ct = ""
+        if "json" not in ct or len(self.api_log) >= _API_LOG_LIMIT:
+            return
+        duration_ms = int((time.time() - start) * 1000) if start else None
+        try:
+            headers = {k: ("[已隐藏]" if k.lower() in _REDACT_HEADERS else v)
+                      for k, v in req.headers.items()}
+        except Exception:
+            headers = {}
+        try:
+            body = resp.text()
+            if len(body) > 3000:
+                body = body[:3000] + "…（已截断）"
+        except Exception:
+            body = None
+        post_data = None
+        try:
+            if req.post_data:
+                post_data = req.post_data[:2000]
+        except Exception:
+            pass
+        self.api_log.append({
+            "method": req.method,
+            "url": resp.url[:500],
+            "status": resp.status,
+            "duration_ms": duration_ms,
+            "request_headers": headers,
+            "request_body": post_data,
+            "response_body": body,
+        })
 
     def selector(self, key: str) -> str:
         """selectors 里的别名 -> CSS；不是别名就当原始选择器用"""
@@ -163,6 +220,7 @@ class Context:
     def reset_signals(self):
         self.console_errors.clear()
         self.failed_requests.clear()
+        self.api_log.clear()
 
 
 # ---------- 配置加载 ----------
@@ -201,6 +259,7 @@ def load_config(path: str) -> PageConfig:
         cases=cases,
         variables=raw.get("variables", {}),
         list_api=raw.get("list_api"),
+        search_timeout=raw.get("search_timeout", 30000),
         export_mode=raw.get("export_mode", "auto"),
         export_task_api=raw.get("export_task_api"),
         login=raw.get("login", {}),
@@ -299,7 +358,8 @@ def run_case(ctx: Context, case: Case) -> CaseResult:
             if step.action == "delete_and_verify":
                 results.append(run_step(ctx, step))
 
-    return CaseResult(case.name, status, results, int((time.time() - t0) * 1000))
+    return CaseResult(case.name, status, results, int((time.time() - t0) * 1000),
+                      api_calls=list(ctx.api_log))
 
 
 def run_page(config: PageConfig, out_dir: str, headless: bool = True,

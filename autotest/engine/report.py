@@ -47,11 +47,60 @@ border-bottom:1px dashed #eef0f2;align-items:flex-start}
 .msg.err{color:#e34d59}
 .msg.warn{color:#b8860b}
 .shot{display:block;margin-top:8px;max-width:520px;border:1px solid #e6e8eb;border-radius:4px}
+.api-log{margin:8px 18px 12px;font-size:12px}
+.api-log>summary{cursor:pointer;color:#8a9099;list-style:none;padding:4px 0}
+.api-log>summary::-webkit-details-marker{display:none}
+.api-log>summary:hover{color:#0052d9}
+.api-call{border:1px solid #eef0f2;border-radius:4px;margin-top:6px;overflow:hidden}
+.api-call>summary{cursor:pointer;list-style:none;padding:6px 10px;
+display:flex;gap:8px;align-items:center;background:#fafbfc}
+.api-call>summary::-webkit-details-marker{display:none}
+.api-call .method{font-family:ui-monospace,Menlo,monospace;font-weight:600;color:#0052d9;flex:0 0 auto}
+.api-call .url{color:#4b5158;flex:1;word-break:break-all}
+.api-call .status{flex:0 0 auto;font-weight:600;color:#00a870}
+.api-call .status.err{color:#e34d59}
+.api-call .dur{flex:0 0 auto;color:#bbc0c6}
+.api-call-body{padding:8px 10px;background:#fff;border-top:1px solid #eef0f2}
+.api-call-body pre{margin:4px 0 10px;padding:8px;background:#f5f6f8;border-radius:4px;
+overflow-x:auto;white-space:pre-wrap;word-break:break-all;font-size:11.5px}
+.api-call-body .k{color:#8a9099;font-size:11px;text-transform:uppercase;letter-spacing:.04em}
 """
 
 
 def _badge(s: Status) -> str:
     return f'<span class="badge b-{s.value}">{s.value.upper()}</span>'
+
+
+def _api_log_html(calls: list) -> str:
+    """
+    这条用例触发的接口调用列表——默认折叠，只有真要排查"到底打了什么
+    接口、传了什么参数、返回了什么"时才展开，不占报告默认的阅读空间。
+    请求头在记录时（Context._on_api_response）已经把 Cookie/Authorization
+    这类凭证替换成"[已隐藏]"，这里不用再额外处理。
+    """
+    if not calls:
+        return ""
+    items = []
+    for c in calls:
+        status = c.get("status")
+        cls = " err" if status is not None and status >= 400 else ""
+        dur = c.get("duration_ms")
+        dur_txt = f"{dur}ms" if dur is not None else "—"
+        headers_txt = json.dumps(c.get("request_headers") or {}, ensure_ascii=False, indent=2)
+        body_parts = [f'<div class="k">请求头</div><pre>{html.escape(headers_txt)}</pre>']
+        if c.get("request_body"):
+            body_parts.append(f'<div class="k">请求参数</div><pre>{html.escape(c["request_body"])}</pre>')
+        body_parts.append(f'<div class="k">响应</div><pre>{html.escape(c.get("response_body") or "")}</pre>')
+        items.append(
+            f'<details class="api-call"><summary>'
+            f'<span class="method">{html.escape(c.get("method", ""))}</span>'
+            f'<span class="url">{html.escape(c.get("url", ""))}</span>'
+            f'<span class="status{cls}">{status if status is not None else "—"}</span>'
+            f'<span class="dur">{dur_txt}</span></summary>'
+            f'<div class="api-call-body">{"".join(body_parts)}</div></details>'
+        )
+    return (f'<details class="api-log"><summary>接口调用（{len(calls)} 次）</summary>'
+           + "".join(items) + "</details>")
 
 
 def render(results: List[PageResult], out_path: str) -> str:
@@ -94,7 +143,9 @@ def render(results: List[PageResult], out_path: str) -> str:
                 if s.screenshot:
                     parts.append(f'<img class="shot" src="{html.escape(s.screenshot)}">')
                 parts.append("</span></div>")
-            parts.append("</div></details>")
+            parts.append("</div>")
+            parts.append(_api_log_html(c.api_calls))
+            parts.append("</details>")
         parts.append("</div>")
 
     parts.append("</div></body></html>")

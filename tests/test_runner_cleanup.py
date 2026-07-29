@@ -7,6 +7,7 @@ if "playwright.sync_api" not in sys.modules:
     sync_api = types.ModuleType("playwright.sync_api")
     sync_api.Page = object
     sync_api.Locator = object
+    sync_api.TimeoutError = type('TimeoutError', (Exception,), {})
     sync_api.sync_playwright = object()
     playwright.sync_api = sync_api
     sys.modules["playwright"] = playwright
@@ -50,10 +51,12 @@ class FakeCtx:
         self.vars = {"created_identity": None, "created_identity_column": None}
         self.console_errors = []
         self.failed_requests = []
+        self.api_log = []
 
     def reset_signals(self):
         self.console_errors.clear()
         self.failed_requests.clear()
+        self.api_log.clear()
 
     def selector(self, key):
         return key

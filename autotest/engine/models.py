@@ -48,6 +48,10 @@ class PageConfig:
     cases: List[Case] = field(default_factory=list)
     variables: Dict[str, Any] = field(default_factory=dict)
     list_api: Optional[str] = None          # 列表接口 URL 片段，用于等待响应
+    # search 动作等列表接口响应的超时（毫秒）。批量执行并发跑多个页面时，
+    # 同一时间好几个 Chromium 一起打同一个后端，响应会比单独跑慢一截——
+    # 默认给够余量；个别页面接口本来就慢，可以在这个页面自己的配置里调大。
+    search_timeout: int = 30000
     export_mode: str = "auto"               # direct | async | auto
     export_task_api: Optional[str] = None
     login: Dict[str, Any] = field(default_factory=dict)   # UI 自动登录配置
@@ -78,6 +82,11 @@ class CaseResult:
     steps: List[StepResult] = field(default_factory=list)
     duration_ms: int = 0
     error: str = ""
+    # 这条用例执行期间触发的接口调用（方法/URL/状态码/耗时/入参/响应），
+    # 调试"页面显示不对"时能直接看到到底打了哪些接口、传了什么、返回了
+    # 什么，不用现场开 F12 重新操作一遍去抓包。鉴权类请求头（Cookie/
+    # Authorization 等）在记录时就已经被替换掉，报告里不会出现真实凭证。
+    api_calls: List[Dict[str, Any]] = field(default_factory=list)
 
 
 @dataclass

@@ -48,6 +48,12 @@ SCAN_TIMEOUT_SEC = 150
 # 一个相对稳的默认值，服务器内存宽裕再考虑调大。
 DEFAULT_CONCURRENCY = 2
 
+# 并发起步时错峰的间隔（秒）。几个 worker 提交后几乎同时登录、同时点第一次
+# 搜索，会在最开始几秒钟形成一次并发高峰，把目标后端的响应瞬时拖慢——
+# 让排在后面的 worker 晚一点点开始，把这个起步高峰削掉，跑到中途各 worker
+# 进度自然错开，不需要一直错峰。
+STAGGER_DELAY_SEC = 2
+
 
 def _log(cb, msg):
     print(msg, flush=True)
@@ -206,6 +212,11 @@ def run_selected(dir_name: str, out_dir: str,
 
     def run_one(idx: int, name: str, cfg_path: Path) -> None:
         tag = f"[{name}]"
+        # 只错峰第一批并发起步的 worker（idx < concurrency）——排在后面的
+        # worker 本来就要等前面某个 worker 跑完才轮到，天然已经错开了，
+        # 不需要再额外等。
+        if idx < concurrency:
+            time.sleep(idx * STAGGER_DELAY_SEC)
         t0 = time.time()
         _log(on_log, f"\n{tag} 开始")
         try:
