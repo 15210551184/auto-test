@@ -61,7 +61,24 @@ border-bottom:1px dashed #eef0f2;align-items:flex-start}
 .msg{color:#4b5158;word-break:break-all;flex:1}
 .msg.err{color:#e34d59}
 .msg.warn{color:#b8860b}
-.shot{display:block;margin-top:8px;max-width:520px;border:1px solid #e6e8eb;border-radius:4px}
+.shot{display:block;margin-top:8px;max-width:520px;border:1px solid #e6e8eb;border-radius:4px;cursor:zoom-in}
+.shots{display:flex;gap:12px;margin-top:8px;flex-wrap:wrap}
+.shot-fig{margin:0;flex:1 1 240px;min-width:0;max-width:380px}
+.shot-fig figcaption{font-size:11px;color:#8a9099;margin-bottom:4px}
+.shot-fig img{display:block;width:100%;border:1px solid #e6e8eb;border-radius:4px;cursor:zoom-in}
+.dl{display:inline-block;margin-top:8px;font-size:12px;padding:5px 11px;border-radius:5px;
+background:#eef4ff;color:#0052d9;text-decoration:none;border:1px solid #d4e2ff}
+.dl:hover{background:#e0ebff}
+#lb{position:fixed;inset:0;background:rgba(0,0,0,.82);display:none;z-index:99;
+align-items:center;justify-content:center;cursor:zoom-out;padding:24px}
+#lb.on{display:flex}
+#lb img{max-width:100%;max-height:100%;border-radius:4px}
+.card.clickable{cursor:pointer;user-select:none}
+.card.clickable:hover{border-color:#c0c6cd;background:#fbfcfd}
+.card.active{border-color:#0052d9;box-shadow:0 0 0 2px rgba(0,82,217,.12)}
+.filter-tip{font-size:12px;color:#8a9099;margin:-8px 0 14px}
+body.only-fail .case.ok{display:none}
+body.only-fail .page.nofail{display:none}
 .api-log{margin:8px 18px 12px;font-size:12px}
 .api-log>summary{cursor:pointer;color:#8a9099;list-style:none;padding:4px 0}
 .api-log>summary::-webkit-details-marker{display:none}
@@ -84,6 +101,29 @@ overflow-x:auto;white-space:pre-wrap;word-break:break-all;font-size:11.5px}
 
 def _badge(s: Status) -> str:
     return f'<span class="badge b-{s.value}">{s.value.upper()}</span>'
+
+
+def _detail_html(detail: Optional[dict]) -> str:
+    """
+    动作挂在结果上的附件：对比截图（搜索前/后这种）和可下载文件（导出的
+    xlsx）。detail 里不认识的 key 直接忽略——动作想加新类型的附件不用先
+    改这里，加了对应分支才会渲染出来。
+    """
+    if not detail:
+        return ""
+    out = []
+    images = [i for i in (detail.get("images") or []) if i.get("path")]
+    if images:
+        figs = "".join(
+            f'<figure class="shot-fig"><figcaption>{html.escape(i.get("label", ""))}</figcaption>'
+            f'<img src="{html.escape(i["path"])}" loading="lazy"></figure>'
+            for i in images)
+        out.append(f'<div class="shots">{figs}</div>')
+    dl = detail.get("download")
+    if dl and dl.get("path"):
+        out.append(f'<a class="dl" href="{html.escape(dl["path"])}" download>⤓ '
+                  f'{html.escape(dl.get("label") or "下载文件")}</a>')
+    return "".join(out)
 
 
 def _api_log_html(calls: list) -> str:
@@ -133,7 +173,8 @@ def render(results: List[PageResult], out_path: str) -> str:
 <div class="cards">
 <div class="card"><div class="n">{total}</div><div class="l">用例总数</div></div>
 <div class="card pass"><div class="n">{passed}</div><div class="l">通过</div></div>
-<div class="card fail"><div class="n">{failed}</div><div class="l">失败</div></div>
+<div class="card fail clickable" id="failCard" onclick="toggleOnlyFail()">
+<div class="n">{failed}</div><div class="l">失败</div></div>
 <div class="card skip"><div class="n">{skipped}</div><div class="l">跳过</div></div>
 <div class="card warn"><div class="n">{warned}</div><div class="l">其中有警告</div></div>
 <div class="card"><div class="n">{(passed/total*100 if total else 0):.0f}%</div>
@@ -142,15 +183,19 @@ def render(results: List[PageResult], out_path: str) -> str:
 <div class="toolbar">
 <button type="button" onclick="document.querySelectorAll('details').forEach(d=>d.open=true)">全部展开</button>
 <button type="button" onclick="document.querySelectorAll('details').forEach(d=>d.open=false)">全部收起</button>
-</div>"""]
+</div>
+<div class="filter-tip">点上面「失败」卡片只看失败用例，再点一次恢复；截图点一下能放大。</div>"""]
 
     for pr in results:
-        parts.append(f'<details class="page" open><summary>{html.escape(pr.name)}'
+        page_cls = "page" if pr.failed else "page nofail"
+        parts.append(f'<details class="{page_cls}" open><summary>{html.escape(pr.name)}'
                      f'<a href="{html.escape(pr.url)}" target="_blank" '
                      f'onclick="event.stopPropagation()">{html.escape(pr.url)}</a></summary>')
         for c in pr.cases:
-            openattr = " open" if c.status in (Status.FAIL, Status.ERROR) else ""
-            parts.append(f'<details class="case"{openattr}><summary>{_badge(c.status)}'
+            is_fail = c.status in (Status.FAIL, Status.ERROR)
+            case_cls = "case" if is_fail else "case ok"
+            openattr = " open" if is_fail else ""
+            parts.append(f'<details class="{case_cls}"{openattr}><summary>{_badge(c.status)}'
                          f'<span>{html.escape(c.name)}</span>'
                          f'<span class="ms">{c.duration_ms}ms</span></summary><div class="steps">')
             for s in c.steps:
@@ -162,13 +207,28 @@ def render(results: List[PageResult], out_path: str) -> str:
                              f'<span class="msg{cls}">{html.escape(s.message)}')
                 if s.screenshot:
                     parts.append(f'<img class="shot" src="{html.escape(s.screenshot)}">')
+                parts.append(_detail_html(s.detail))
                 parts.append("</span></div>")
             parts.append("</div>")
             parts.append(_api_log_html(c.api_calls))
             parts.append("</details>")
         parts.append("</details>")
 
-    parts.append("</div></body></html>")
+    parts.append("""</div>
+<div id="lb" onclick="this.classList.remove('on')"><img id="lbImg"></div>
+<script>
+document.addEventListener('click', function(e){
+  var img = e.target.closest('.shot, .shot-fig img');
+  if(!img) return;
+  document.getElementById('lbImg').src = img.src;
+  document.getElementById('lb').classList.add('on');
+});
+function toggleOnlyFail(){
+  document.body.classList.toggle('only-fail');
+  document.getElementById('failCard').classList.toggle('active');
+}
+</script>
+</body></html>""")
     os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
     with open(out_path, "w", encoding="utf-8") as f:
         f.write("".join(parts))

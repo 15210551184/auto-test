@@ -33,6 +33,16 @@ def _fail_action(ctx, **kw):
     raise AssertionFailed("测试失败")
 
 
+@action("__test_fail_with_detail_action")
+def _fail_with_detail_action(ctx, **kw):
+    raise AssertionFailed("测试失败", detail={"download": {"label": "x.xlsx", "path": "downloads/x.xlsx"}})
+
+
+@action("__test_pass_with_detail_action")
+def _pass_with_detail_action(ctx, **kw):
+    return "ok", {"images": [{"label": "前", "path": "a.png"}, {"label": "后", "path": "b.png"}]}
+
+
 class FakeCtx:
     def __init__(self):
         self.shot_calls = []
@@ -60,6 +70,28 @@ class RunStepStatusMappingTests(unittest.TestCase):
         ctx = FakeCtx()
         r = run_step(ctx, Step("__test_pass_action", {}))
         self.assertEqual(Status.PASS, r.status)
+        self.assertEqual("ok", r.message)
+        self.assertIsNone(r.detail)
+
+    def test_pass_action_can_return_detail_tuple(self):
+        # 动作可以返回 (消息, detail) 而不是只有消息——detail 是给报告用的
+        # 结构化附件（对比截图/下载链接），run_step 得原样搬进 StepResult。
+        ctx = FakeCtx()
+        r = run_step(ctx, Step("__test_pass_with_detail_action", {}))
+        self.assertEqual(Status.PASS, r.status)
+        self.assertEqual("ok", r.message)
+        self.assertEqual(2, len(r.detail["images"]))
+
+    def test_failure_detail_is_propagated_from_exception(self):
+        ctx = FakeCtx()
+        r = run_step(ctx, Step("__test_fail_with_detail_action", {}))
+        self.assertEqual(Status.FAIL, r.status)
+        self.assertEqual({"label": "x.xlsx", "path": "downloads/x.xlsx"}, r.detail["download"])
+
+    def test_failure_without_detail_leaves_it_none(self):
+        ctx = FakeCtx()
+        r = run_step(ctx, Step("__test_fail_action", {}))
+        self.assertIsNone(r.detail)
 
 
 class PageResultWarnCountingTests(unittest.TestCase):

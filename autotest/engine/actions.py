@@ -24,7 +24,18 @@ def action(name: str):
 
 
 class AssertionFailed(Exception):
-    """断言失败（业务问题），区别于 Exception（脚本/环境问题）"""
+    """
+    断言失败（业务问题），区别于 Exception（脚本/环境问题）。
+
+    detail 是给报告页面用的结构化附件（下载链接、对比截图之类），跟
+    str(self) 这条给人看的失败消息是两回事——run_step() 会把它原样搬进
+    StepResult.detail，report.py 按里面的 key（如 download/images）渲染
+    对应的 UI，不认识的 key 直接忽略。
+    """
+
+    def __init__(self, msg: str, detail: Dict[str, Any] = None):
+        super().__init__(msg)
+        self.detail = detail
 
 
 class AssertionWarning(Exception):
@@ -36,8 +47,8 @@ class AssertionWarning(Exception):
     """
 
 
-def _fail(msg: str):
-    raise AssertionFailed(msg)
+def _fail(msg: str, detail: Dict[str, Any] = None):
+    raise AssertionFailed(msg, detail=detail)
 
 
 def _warn(msg: str):
@@ -140,7 +151,12 @@ def do_search(ctx, **kw):
        根本不存在）。两次都超时后，失败消息里会把这期间实际收到的
        JSON 接口列出来，方便直接判断是"接口慢"还是"list_api 配错了"。
     超时时长可以在页面配置里用 search_timeout（毫秒）单独调，默认 30s。
+
+    搜索前后各截一张图，作为报告里的"搜索前/搜索后"对比——这条用例
+    十有八九是通过的，通过了也看不出页面到底有没有真的按条件筛出结果，
+    截图比一句"执行搜索"直观。
     """
+    before = ctx.shot("search_before")
     frag = ctx.config.list_api
     btn = ctx.selector("search_btn")
     timeout = ctx.config.search_timeout
@@ -180,7 +196,13 @@ def do_search(ctx, **kw):
         ctx.page.wait_for_timeout(1500)
         retried = False
     ctx.page.wait_for_timeout(400)
-    return "执行搜索（重试后成功）" if retried else "执行搜索"
+    msg = "执行搜索（重试后成功）" if retried else "执行搜索"
+    after = ctx.shot("search_after")
+    detail = None
+    if before or after:
+        detail = {"images": [{"label": "搜索前", "path": before},
+                            {"label": "搜索后", "path": after}]}
+    return msg, detail
 
 
 # ============ 第一期：全自动健康巡检 ============

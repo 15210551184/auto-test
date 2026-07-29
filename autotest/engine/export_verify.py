@@ -180,6 +180,14 @@ def verify_export(ctx, compare_with=None, columns=None, row_count_mode="total",
         else:
             notes.append(f"抽样比对 {checked} 个字段一致")
 
+    download = {"label": f"导出文件 {Path(path).name}",
+               "path": os.path.relpath(path, ctx.report_root)}
     if problems:
-        raise AssertionFailed(" | ".join(problems) + f"  [{'; '.join(notes)}]")
-    return "导出验证通过 ✓ " + "; ".join(notes)
+        # 把导出文件本身挂到报告上：导出对不对，光看一句"缺少列 X/Y"判断不了
+        # 是"导出真漏了"还是"页面表头识别多了"，直接把文件下下来打开看最快。
+        # 当时的页面截图不用在这里另外截——run_step() 对任何 AssertionFailed
+        # 都会自动截一张（StepResult.screenshot），再截一张只是重复。
+        raise AssertionFailed(
+            " | ".join(problems) + f"  [{'; '.join(notes)}]",
+            detail={"download": download})
+    return "导出验证通过 ✓ " + "; ".join(notes), {"download": download}

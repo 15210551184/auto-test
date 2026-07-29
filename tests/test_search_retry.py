@@ -88,6 +88,9 @@ class FakeCtx:
     def selector(self, key):
         return "button:has-text('搜索')"
 
+    def shot(self, tag):
+        return f"screenshots/{tag}.png"
+
 
 class SearchRetryTests(unittest.TestCase):
     """
@@ -98,15 +101,25 @@ class SearchRetryTests(unittest.TestCase):
 
     def test_success_on_first_attempt_no_retry_mentioned(self):
         ctx = FakeCtx(["ok"])
-        msg = do_search(ctx)
+        msg, detail = do_search(ctx)
         self.assertEqual("执行搜索", msg)
         self.assertEqual(1, ctx.page.click_count)
 
     def test_timeout_then_success_retries_once(self):
         ctx = FakeCtx(["timeout", "ok"])
-        msg = do_search(ctx)
+        msg, detail = do_search(ctx)
         self.assertIn("重试后成功", msg)
         self.assertEqual(2, ctx.page.click_count)
+
+    def test_returns_before_after_screenshots_for_report(self):
+        # 报告里要能看"搜索前/搜索后"对比图，不是只有一句"执行搜索"。
+        ctx = FakeCtx(["ok"])
+        msg, detail = do_search(ctx)
+        self.assertEqual(2, len(detail["images"]))
+        self.assertEqual("搜索前", detail["images"][0]["label"])
+        self.assertEqual("screenshots/search_before.png", detail["images"][0]["path"])
+        self.assertEqual("搜索后", detail["images"][1]["label"])
+        self.assertEqual("screenshots/search_after.png", detail["images"][1]["path"])
 
     def test_two_timeouts_raises(self):
         ctx = FakeCtx(["timeout", "timeout"])

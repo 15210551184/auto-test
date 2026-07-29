@@ -3,7 +3,7 @@ import unittest
 from pathlib import Path
 
 from autotest.engine.models import CaseResult, PageResult, Status, StepResult
-from autotest.engine.report import _api_log_html, render
+from autotest.engine.report import _api_log_html, _detail_html, render
 
 
 class ApiLogHtmlTests(unittest.TestCase):
@@ -86,6 +86,94 @@ class RenderIncludesApiLogTests(unittest.TestCase):
             self.assertIn("[已隐藏]", text)
 
 
+class DetailHtmlTests(unittest.TestCase):
+    """
+    StepResult.detail 是动作挂给报告用的结构化附件（对比截图、下载
+    链接）——_detail_html() 负责把它渲染出来，不认识的 key 直接忽略。
+    """
+
+    def test_none_detail_renders_nothing(self):
+        self.assertEqual("", _detail_html(None))
+
+    def test_empty_detail_renders_nothing(self):
+        self.assertEqual("", _detail_html({}))
+
+    def test_images_rendered_with_labels_and_lazy_loading(self):
+        out = _detail_html({"images": [
+            {"label": "搜索前", "path": "screenshots/a.png"},
+            {"label": "搜索后", "path": "screenshots/b.png"},
+        ]})
+        self.assertIn("搜索前", out)
+        self.assertIn("搜索后", out)
+        self.assertIn('src="screenshots/a.png"', out)
+        self.assertIn('src="screenshots/b.png"', out)
+        self.assertIn('loading="lazy"', out)
+
+    def test_images_without_path_are_skipped(self):
+        out = _detail_html({"images": [{"label": "搜索前", "path": ""}]})
+        self.assertNotIn("<img", out)
+
+    def test_download_link_rendered_with_download_attribute(self):
+        out = _detail_html({"download": {"label": "导出文件 x.xlsx", "path": "downloads/x.xlsx"}})
+        self.assertIn('href="downloads/x.xlsx"', out)
+        self.assertIn("download", out)
+        self.assertIn("导出文件 x.xlsx", out)
+
+    def test_download_without_path_is_skipped(self):
+        out = _detail_html({"download": {"label": "x"}})
+        self.assertNotIn("<a", out)
+
+    def test_html_special_chars_are_escaped(self):
+        out = _detail_html({
+            "images": [{"label": "<script>alert(1)</script>", "path": "a.png"}],
+            "download": {"label": "<b>x</b>", "path": "d.xlsx"},
+        })
+        self.assertNotIn("<script>alert(1)</script>", out)
+        self.assertNotIn("<b>x</b>", out)
+
+
+class DetailRenderedInReportTests(unittest.TestCase):
+    def test_search_step_images_and_lightbox_present(self):
+        with tempfile.TemporaryDirectory() as d:
+            out = Path(d) / "report.html"
+            case = CaseResult("搜索-国家名称", Status.PASS, [
+                StepResult("search", {}, Status.PASS, "执行搜索", detail={
+                    "images": [{"label": "搜索前", "path": "screenshots/before.png"},
+                              {"label": "搜索后", "path": "screenshots/after.png"}],
+                }),
+            ])
+            render([PageResult("国家管理", "http://x.test", [case])], str(out))
+            text = out.read_text(encoding="utf-8")
+            self.assertIn("screenshots/before.png", text)
+            self.assertIn("screenshots/after.png", text)
+            self.assertIn('id="lb"', text)   # 点击放大用的 lightbox 容器
+            self.assertIn("toggleOnlyFail", text)
+
+    def test_export_failure_download_link_present(self):
+        with tempfile.TemporaryDirectory() as d:
+            out = Path(d) / "report.html"
+            case = CaseResult("导出数据验证", Status.FAIL, [
+                StepResult("export_and_verify", {}, Status.FAIL, "导出缺少列",
+                          screenshot="screenshots/fail.png",
+                          detail={"download": {"label": "导出文件 city_123.xlsx",
+                                              "path": "downloads/city_123.xlsx"}}),
+            ])
+            render([PageResult("城市管理", "http://x.test", [case])], str(out))
+            text = out.read_text(encoding="utf-8")
+            self.assertIn('href="downloads/city_123.xlsx"', text)
+            self.assertIn("导出文件 city_123.xlsx", text)
+
+    def test_failing_page_does_not_get_nofail_class(self):
+        with tempfile.TemporaryDirectory() as d:
+            out = Path(d) / "report.html"
+            case = CaseResult("导出数据验证", Status.FAIL,
+                              [StepResult("export_and_verify", {}, Status.FAIL, "x")])
+            render([PageResult("城市管理", "http://x.test", [case])], str(out))
+            text = out.read_text(encoding="utf-8")
+            self.assertIn('<details class="page" open><summary>城市管理', text)
+            self.assertIn('<details class="case"', text)   # 失败用例不带 "ok"，不会被过滤隐藏
+
+
 class CollapsibleReportTests(unittest.TestCase):
     """
     页面区块（跟用例一样）现在也是 <details>，能收起/展开；顶部有
@@ -101,8 +189,10 @@ class CollapsibleReportTests(unittest.TestCase):
             return out.read_text(encoding="utf-8")
 
     def test_page_section_is_a_details_element(self):
+        # 这个页面全部通过，会额外带 "nofail" class（配合失败卡片的只看
+        # 失败过滤），但本身仍然是个默认展开的 <details>。
         text = self._render()
-        self.assertIn('<details class="page" open><summary>国家管理', text)
+        self.assertIn('<details class="page nofail" open><summary>国家管理', text)
 
     def test_toolbar_has_expand_and_collapse_all_buttons(self):
         text = self._render()

@@ -123,6 +123,9 @@ class FakeSearchCtx:
     def label_of(self, label):
         return [label]
 
+    def shot(self, tag):
+        return f"screenshots/{tag}.png"
+
 
 class CheckSelectOptionsTests(unittest.TestCase):
     def test_selected_var_is_set_for_downstream_assertion(self):

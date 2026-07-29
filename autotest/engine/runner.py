@@ -278,9 +278,12 @@ def run_step(ctx: Context, step: Step) -> StepResult:
         return StepResult(step.action, step.params, Status.ERROR,
                           f"未知动作 '{step.action}'，可用: {sorted(REGISTRY)}")
     try:
-        msg = fn(ctx, **step.params)
+        out = fn(ctx, **step.params)
+        # 动作可以只返回一句消息，也可以返回 (消息, detail)——detail 是给
+        # 报告页面的结构化附件（对比截图、下载链接），不是所有动作都有。
+        msg, detail = out if isinstance(out, tuple) else (out, None)
         return StepResult(step.action, step.params, Status.PASS,
-                          msg or "", int((time.time() - t0) * 1000))
+                          msg or "", int((time.time() - t0) * 1000), detail=detail)
     except AssertionWarning as e:
         # 警告不算失败，不截图（不是真出问题，没必要留证据），也不会打断后续步骤
         return StepResult(step.action, step.params, Status.WARN, str(e),
@@ -288,7 +291,8 @@ def run_step(ctx: Context, step: Step) -> StepResult:
     except AssertionFailed as e:
         return StepResult(step.action, step.params, Status.FAIL, str(e),
                           int((time.time() - t0) * 1000),
-                          screenshot=ctx.shot(f"fail_{step.action}"))
+                          screenshot=ctx.shot(f"fail_{step.action}"),
+                          detail=getattr(e, "detail", None))
     except Exception as e:
         return StepResult(step.action, step.params, Status.ERROR,
                           f"{type(e).__name__}: {e}",

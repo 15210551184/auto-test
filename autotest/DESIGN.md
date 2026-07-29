@@ -553,6 +553,27 @@ if len(df) > 0 and unnamed >= max(1, len(df.columns) // 2):
     df.columns = df.iloc[0]; df = df.iloc[1:]
 ```
 
+**报告里的"证据"——对比截图 + 可下载文件**：光一句失败消息（"导出缺少列
+X/Y"）判断不了是工具误判还是业务真的漏了，得能直接看到当时的东西。
+`StepResult.detail` 是给报告用的结构化附件，动作函数可以返回
+`(消息, detail)` 而不是只有消息（`run_step()` 支持两种返回形式），
+`AssertionFailed(msg, detail=...)` 同样能带；report.py 的 `_detail_html()`
+认识两种 key，不认识的直接忽略：
+
+- `images`：一组 `{label, path}`，渲染成带说明文字的对比图（比如
+  `search` 动作会自动截"搜索前/搜索后"两张，通过的用例也能看到页面
+  到底有没有真的按条件筛出结果，不是只有一句"执行搜索"）。
+- `download`：`{label, path}`，渲染成 `<a download>` 链接（导出验证
+  不管通过还是失败都会把导出文件本身挂上去，失败时配合已有的自动失败
+  截图——`run_step()` 对所有 `AssertionFailed` 都会截图，这里不用
+  重复截——能直接对照"文件里有什么、页面上有什么"）。
+
+报告页面额外加了两个交互：所有截图（含对比图）点击放大（一个
+`position:fixed` 的 lightbox + 事件委托，不用逐张绑定）；顶部"失败"
+统计卡片点一下只看失败用例（`body.only-fail` + 每个 `.page`/`.case` 视
+有没有失败打上 `nofail`/`ok` class，纯 CSS `display:none`，不用 JS 逐个
+遍历隐藏），再点一次恢复。
+
 ### 4.5 Web 控制台
 
 避免每次 SSH 到服务器敲命令。
