@@ -183,6 +183,31 @@ def selected_pages(dir_name: str) -> List[Dict]:
     return [p for p in data.get("pages", []) if p.get("selected")]
 
 
+def set_scan_languages(dir_name: str, codes: List[str]) -> bool:
+    """
+    扫描时要为哪些语言重新合并 label_variants/header_variants
+    （languages.scan_languages，是 languages.options 的子集）——控制台
+    里勾选框直接调，不用手改 project.yaml。传空列表等于清空
+    scan_languages（只扫默认语言）。传进来的语言码里不在 options
+    里的会被丢弃，防止手滑传错码。
+    """
+    data = load_project(dir_name)
+    if not data or not data.get("languages", {}).get("options"):
+        return False
+    for p in data.get("pages", []):
+        p.pop("has_config", None)
+    langs = dict(data["languages"])
+    valid = set(langs["options"])
+    picked = [c for c in codes if c in valid]
+    if picked:
+        langs["scan_languages"] = picked
+    else:
+        langs.pop("scan_languages", None)
+    data["languages"] = langs
+    save_project(data)
+    return True
+
+
 def inject_project_settings(cfg: Dict, project: Dict) -> Dict:
     """
     把项目级设置（登录信息、多语言切换配置）注入到页面配置里。

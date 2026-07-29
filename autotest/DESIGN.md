@@ -691,6 +691,12 @@ languages:
 元素）。`scan_languages` 可以是 `options` 的子集，只为列出来的语言重扫，
 其余语言不碰。
 
+不用手改 YAML：控制台"扫描系统菜单"步骤下面有一排勾选框（项目配了
+`languages.options` 才会出现），勾哪几种语言就是 `scan_languages` 里
+的哪几种，勾选即通过 `POST /api/projects/<d>/scan-languages` 保存，
+下次扫描直接生效（`engine/project.py` 的 `set_scan_languages()`，只收
+`options` 里真实存在的语言码，全部取消勾选等于清空这个字段）。
+
 **这是一次默认行为变化**：改之前，只要项目配了 `languages.options`，
 扫描时会为 *全部* 语言重扫一遍；改之后，不显式配 `scan_languages`
 就完全不扫，速度更快但默认丢了多语言 label/表头健壮性——已有项目想

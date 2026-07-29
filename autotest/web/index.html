@@ -294,6 +294,12 @@ a.open:hover{text-decoration:underline}
             <button id="btnDiscover">扫描系统菜单</button>
           </div>
           <div class="hint" title="登录后展开左侧菜单，逐个访问并识别有没有表格、能不能导出。">识别页面结构（表格/导出），首次使用先点这个</div>
+          <div class="tag-filter" id="scanLangFilter" style="display:none;margin-top:8px">
+            <div class="tf-title">
+              扫描多语言健壮性<span class="tf-hint">（勾选的语言，扫描时会重新切一次语言、把表单/表头译文按位置对齐；不勾 = 只扫默认语言，更快。勾选即保存，下次扫描生效）</span>
+            </div>
+            <div class="tf-list" id="scanLangList"></div>
+          </div>
         </div>
         <div class="step">
           <div class="step-h">2 · 生成用例</div>
@@ -426,7 +432,29 @@ function renderLangFilter(){
       codes.map(c=>'<option value="'+esc(c)+'">'+esc(options[c])+'</option>').join('');
   }
   updateExecOptsBadge();
+  renderScanLangFilter();
 }
+function renderScanLangFilter(){
+  const box=$('#scanLangFilter'), list=$('#scanLangList');
+  const options=(proj&&proj.languages&&proj.languages.options)||{};
+  const codes=Object.keys(options);
+  if(!codes.length){box.style.display='none';list.innerHTML='';return;}
+  box.style.display='';
+  const picked=new Set((proj.languages.scan_languages)||[]);
+  list.innerHTML=codes.map(c=>'<label><input type="checkbox" data-scanlang value="'+esc(c)+'"'+
+    (picked.has(c)?' checked':'')+'> '+esc(options[c])+'</label>').join('');
+}
+async function saveScanLanguages(){
+  if(!proj)return;
+  const codes=[...document.querySelectorAll('[data-scanlang]:checked')].map(el=>el.value);
+  const r=await post('/api/projects/'+encodeURIComponent(proj.dir)+'/scan-languages',{codes});
+  if(!r.ok||!r.data.ok)return toast(r.data.msg||'保存失败',true);
+  proj.languages.scan_languages=codes;
+  toast(codes.length?'已保存，扫描时会为这 '+codes.length+' 种语言合并译文':'已清空，扫描时只扫默认语言');
+}
+$('#scanLangList').addEventListener('change',e=>{
+  if(e.target.matches('[data-scanlang]'))saveScanLanguages();
+});
 function updateExecOptsBadge(){
   const bits=[];
   const langSel=$('#langSelect');

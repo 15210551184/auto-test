@@ -655,6 +655,18 @@ def api_save_project_settings(d):
     return jsonify({"ok": True})
 
 
+@app.post("/api/projects/<d>/scan-languages")
+def api_set_scan_languages(d):
+    body = request.get_json(force=True) or {}
+    codes = body.get("codes")
+    if not isinstance(codes, list):
+        return jsonify({"ok": False, "msg": "codes 必须是数组"}), 400
+    ok = P.set_scan_languages(d, [str(c) for c in codes])
+    if not ok:
+        return jsonify({"ok": False, "msg": "项目未配置 languages.options，先探测/填好语言选项"}), 400
+    return jsonify({"ok": True})
+
+
 @app.get("/reports/<path:sub>")
 def serve_report(sub):
     return send_from_directory(REPORT_DIR, sub)
