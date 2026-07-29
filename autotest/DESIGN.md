@@ -74,8 +74,8 @@
 | `engine/explain.py` | 380 | 把 YAML 用例翻译成人话，供不看代码的人核对 |
 | `engine/runner.py` | 373 | 执行编排、上下文、用例隔离、WARN 分级、`target_language` 执行时切语言 |
 | `engine/login.py` | 291 | UI 自动登录、懒登录、验证码检测 |
-| `engine/batch.py` | 273 | 批量扫描/执行，并发跑多个页面 |
-| `cli.py` | 231 | 命令行入口 |
+| `engine/batch.py` | 328 | 批量扫描/执行，并发跑多个页面 |
+| `cli.py` | 286 | 命令行入口 |
 | `engine/project.py` | 195 | 项目（登录信息、语言配置 + 菜单地图）管理 |
 | `engine/export_verify.py` | 185 | 导出下载与 Excel 比对 |
 | `engine/normalize.py` | 141 | 值归一化与比较 |
@@ -352,6 +352,18 @@ else:
 
 **一个细节**：搜索用例的搜索词不是随机生成的，而是**从表格样本值里取**。
 搜「222」保证有结果，能验证「搜出来的都对」；搜随机串只能验证「搜不出来」。
+
+**批量扫描并发 + 超时预算按语言数量走**：`batch.scan_selected()` 最多
+`concurrency` 个页面并发扫描（默认 2，跟 `run_selected()` 一样，不需要
+`run_selected()` 那套"先登录一次共享 cookie"的协调——`scanner.scan()`
+本身只读 `storage_state` 文件，不主动登录也不回写，多个 worker 同时读
+同一份 cookie 文件没有写冲突，直接各自起独立的 `sync_playwright()` 会话
+并发跑即可）。单页扫描的硬超时（`SCAN_TIMEOUT_SEC`，默认 150s）按项目配的
+语言数量成正比增加（`_scan_timeout_for()`，每种语言多给 `LANG_SCAN_
+BUDGET_SEC`=30s）——配了多语言的项目，`scan_language_variants()` 会为
+每种语言切一次、重新扫一遍表单/表头/弹窗字段，纯 CRUD 页面也会因为这部分
+多花不少时间，所有页面共用同一个只按"不带多语言"估的固定上限会导致
+配了语言的项目大批量假性超时。
 
 ### 4.2 列名映射：一个刻意保守的设计
 
