@@ -700,8 +700,15 @@ function appendLine(s){
   if(page){
     if(!logLines[page]){logLines[page]=[];logTabOrder.push(page);logTabStatus[page]='run';}
     logLines[page].push(s);
+    // 执行阶段每页跑完会打"小计：通过 X / 失败 Y"，靠这行判断标签页该显示
+    // 绿色还是红色。扫描阶段（生成用例）没有这行——之前扫描日志也套用了
+    // 跟执行一样的 [页面名] 标签格式（为了免费拿到按页面分标签这个功能），
+    // 但状态判断只认执行阶段那一种格式，导致扫描完的页面标签会一直转圈圈，
+    // 永远停在"运行中"。这里补上扫描阶段自己的完成信号（生成成功/失败/跳过）。
     const m=/小计：通过\s*(\d+)\s*\/\s*失败\s*(\d+)/.exec(s);
     if(m) logTabStatus[page]=(+m[2]>0)?'fail':'pass';
+    else if(/生成 \d+ 条用例|已有配置，跳过|跳过（没有 URL）/.test(s)) logTabStatus[page]='pass';
+    else if(/^\[[^\]]+\]\s*失败[:：]/.test(s)) logTabStatus[page]='fail';
     renderLogTabs();
   }
   if(activeLogTab==='__all__'||activeLogTab===page) renderLine(s);
