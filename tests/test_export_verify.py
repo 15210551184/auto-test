@@ -106,6 +106,50 @@ class ExportDetailAttachmentTests(unittest.TestCase):
         self.assertEqual("city_1785312571891.xlsx", detail["download"]["path"])
         self.assertEqual([], ctx.shot_calls)   # 通过不需要留截图，只留文件链接
 
+    def test_configured_columns_compare_values_beyond_first_five(self):
+        # 页面第 7 个可比字段“加盟商”显示名称，而导出错误地写了内部 ID。
+        columns = ["国家", "城市", "司机姓名", "司机手机号", "车牌号", "VIN码", "加盟商"]
+        ui_row = {col: f"页面-{col}" for col in columns}
+        xl_row = dict(ui_row)
+        xl_row["加盟商"] = "869508055602171904"
+        EV._read_table = lambda path: [xl_row]
+        ctx = FakeCtx(
+            self.tmp.name,
+            ui_headers=["序号", "司机头像", *columns, "操作"],
+            total=1,
+        )
+        ctx.data["page_data"] = [ui_row]
+
+        with self.assertRaises(AssertionFailed) as cm:
+            EV.verify_export(
+                ctx,
+                compare_with="page_data",
+                columns=columns,
+            )
+
+        message = str(cm.exception)
+        self.assertIn("字段不一致 1/7", message)
+        self.assertIn("加盟商", message)
+        self.assertIn("869508055602171904", message)
+        # 头像是纯展示列，不该遮住真正的字段值错误。
+        self.assertNotIn("司机头像", message)
+
+    def test_missing_configured_column_cannot_be_silently_skipped(self):
+        EV._read_table = lambda path: [{"国家": "中国"}]
+        ctx = FakeCtx(self.tmp.name, ui_headers=["国家", "加盟商"], total=1)
+        ctx.data["page_data"] = [{"国家": "中国", "加盟商": "北京加盟商"}]
+
+        with self.assertRaises(AssertionFailed) as cm:
+            EV.verify_export(
+                ctx,
+                compare_with="page_data",
+                columns=["国家", "加盟商"],
+            )
+
+        message = str(cm.exception)
+        self.assertIn("导出缺少页面上的列: ['加盟商']", message)
+        self.assertIn("以下配置列未实际参与数据比对: ['加盟商']", message)
+
 
 if __name__ == "__main__":
     unittest.main()

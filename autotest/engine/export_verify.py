@@ -141,7 +141,11 @@ def verify_export(ctx, compare_with=None, columns=None, row_count_mode="total",
 
     # --- 1. 表头一致性 ---
     if header_match and rows:
-        ui_headers = [h for h in ctx.ui.headers(ctx.page) if h not in ("操作", "序号", "")]
+        # columns 是生成/人工确认过的“可导出、可比较列”。配置存在时以它为准，
+        # 不再强制要求头像、操作按钮等纯页面展示列也出现在 Excel 中。
+        ui_headers = (list(columns) if columns else [
+            h for h in ctx.ui.headers(ctx.page) if h not in ("操作", "序号", "")
+        ])
         xl_headers = list(rows[0].keys())
         missing = [h for h in ui_headers if h not in xl_headers]
         if missing:
@@ -165,20 +169,29 @@ def verify_export(ctx, compare_with=None, columns=None, row_count_mode="total",
     if src and columns:
         checked = 0
         diffs = []
+        skipped = set()
         for i, ui_row in enumerate(src[:sample]):
             if i >= len(rows):
                 break
             xl_row = rows[i]
             for col in columns:
                 if col not in ui_row or col not in xl_row:
+                    skipped.add(col)
                     continue
                 checked += 1
                 if not N.compare(ui_row[col], xl_row[col]):
                     diffs.append(f"行{i+1} {col}: 页面='{ui_row[col]}' 导出='{xl_row[col]}'")
+        if skipped:
+            problems.append(f"以下配置列未实际参与数据比对: {sorted(skipped)}")
         if diffs:
             problems.append(f"字段不一致 {len(diffs)}/{checked} 处: {diffs[:5]}")
+        elif checked:
+            notes.append(
+                f"抽样比对 {checked} 个字段一致"
+                f"（{min(len(src), sample, len(rows))} 行 × {len(columns)} 列）"
+            )
         else:
-            notes.append(f"抽样比对 {checked} 个字段一致")
+            problems.append("没有任何字段实际参与数据比对")
 
     download = {"label": f"导出文件 {Path(path).name}",
                "path": os.path.relpath(path, ctx.report_root)}
