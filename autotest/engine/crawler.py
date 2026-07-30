@@ -57,6 +57,7 @@ SKIP_KEYWORDS = _i18n_words("logout") + [
 # 的脚本/资源一直不结束时，50 页几乎每页都吃满 30 秒，看起来像“卡死”。
 PROBE_NAV_TIMEOUT_MS = 15000
 PROBE_DOM_BUDGET_MS = 6000
+PROBE_STRUCTURE_BUDGET_MS = 4000
 PROBE_ACTION_TIMEOUT_MS = 4000
 
 
@@ -427,7 +428,15 @@ def _visit_and_probe(page: Page, target_url: str, on_progress=None):
                 "domcontentloaded", timeout=PROBE_DOM_BUDGET_MS)
         except Exception:
             _progress(on_progress, "  页面资源仍在加载，使用当前已渲染内容继续识别")
-        probe_page.wait_for_timeout(600)
+        # DOMContentLoaded 只表示 HTML/脚本加载完成，不表示 Vue/React 已经把
+        # 异步列表组件挂到 DOM。上一版这里只等 600ms，真实页面明明有表格却
+        # 被整组标成“无表格”。额外等待表头，但给严格上限：无表格页面最多
+        # 多等 4 秒，绝不会退回以前单页卡 30 秒的状态。
+        table_ready = _wait_for_probe_structure(probe_page)
+        if table_ready:
+            _progress(on_progress, "  已检测到表格表头，开始结构识别")
+        else:
+            _progress(on_progress, "  等待表格表头超时，按当前页面结构继续识别")
         url = probe_page.url
         elapsed = time.monotonic() - started
         _progress(on_progress, f"  页面已打开（{elapsed:.1f}s），正在识别表格和操作能力…")
@@ -439,6 +448,23 @@ def _visit_and_probe(page: Page, target_url: str, on_progress=None):
             probe_page.close(run_before_unload=False)
         except Exception:
             pass
+
+
+def _wait_for_probe_structure(page: Page) -> bool:
+    """有界等待主流表格组件的任一表头挂载完成。"""
+    try:
+        headers = page.locator(
+            ".el-table__header-wrapper th .cell, "
+            ".ant-table-thead th, "
+            "table.data-table thead th, "
+            "table thead th"
+        ).first
+        headers.wait_for(state="attached", timeout=PROBE_STRUCTURE_BUDGET_MS)
+        # 表头刚挂载时同一轮渲染可能还在补固定列和工具栏，留一个很短的收尾。
+        page.wait_for_timeout(300)
+        return True
+    except Exception:
+        return False
 
 
 def _probe_page(page: Page, on_progress=None) -> Dict:

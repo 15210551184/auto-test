@@ -40,6 +40,31 @@ class FakeOwnerPage:
         })()
 
 
+class FakeHeaders:
+    def __init__(self, should_timeout=False):
+        self.first = self
+        self.should_timeout = should_timeout
+        self.wait_args = None
+
+    def wait_for(self, **kwargs):
+        self.wait_args = kwargs
+        if self.should_timeout:
+            raise TimeoutError("no table")
+
+
+class FakeStructurePage:
+    def __init__(self, should_timeout=False):
+        self.headers = FakeHeaders(should_timeout)
+        self.settle_wait = None
+
+    def locator(self, selector):
+        self.selector = selector
+        return self.headers
+
+    def wait_for_timeout(self, milliseconds):
+        self.settle_wait = milliseconds
+
+
 class BoundedMenuProbeTest(unittest.TestCase):
     def test_probe_uses_commit_and_closes_isolated_page(self):
         probe = FakeProbePage()
@@ -84,6 +109,20 @@ class BoundedMenuProbeTest(unittest.TestCase):
         self.assertTrue(login)
         inspect.assert_not_called()
         self.assertTrue(probe.closed)
+
+    def test_waits_for_table_headers_with_strict_budget(self):
+        page = FakeStructurePage()
+        self.assertTrue(crawler._wait_for_probe_structure(page))
+        self.assertEqual({
+            "state": "attached",
+            "timeout": crawler.PROBE_STRUCTURE_BUDGET_MS,
+        }, page.headers.wait_args)
+        self.assertEqual(300, page.settle_wait)
+
+    def test_page_without_table_falls_back_after_budget(self):
+        page = FakeStructurePage(should_timeout=True)
+        self.assertFalse(crawler._wait_for_probe_structure(page))
+        self.assertIsNone(page.settle_wait)
 
 
 if __name__ == "__main__":
