@@ -156,7 +156,8 @@ def do_search(ctx, **kw):
     十有八九是通过的，通过了也看不出页面到底有没有真的按条件筛出结果，
     截图比一句"执行搜索"直观。
     """
-    before = ctx.shot("search_before")
+    evidence = not getattr(ctx, "suppress_search_evidence", False)
+    before = ctx.shot("search_before") if evidence else ""
     frag = ctx.config.list_api
     btn = ctx.selector("search_btn")
     timeout = ctx.config.search_timeout
@@ -197,7 +198,7 @@ def do_search(ctx, **kw):
         retried = False
     ctx.page.wait_for_timeout(400)
     msg = "执行搜索（重试后成功）" if retried else "执行搜索"
-    after = ctx.shot("search_after")
+    after = ctx.shot("search_after") if evidence else ""
     detail = None
     if before or after:
         detail = {"images": [{"label": "搜索前", "path": before},

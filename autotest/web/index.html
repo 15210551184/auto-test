@@ -48,9 +48,12 @@ header .sep{color:var(--line)}
   .col-left>.card:not(.term-card) .tree{flex:1;max-height:none}
   .col-left>.card.term-card{flex:1 1 42%;display:flex;flex-direction:column}
   .term-card .term{flex:1;height:auto;min-height:0}
-  .col-right>.card:first-child{flex:0 0 auto}
-  .col-right>.card:last-child{flex:1;display:flex;flex-direction:column}
-  .col-right>.card:last-child #repWrap{flex:1;overflow-y:auto;min-height:0}
+  /* 操作区只占右栏上半部分，内容过多时在卡片内部滚动，把稳定的可视空间
+     留给历史报告。否则浏览器缩放较大或屏幕较矮时，操作区会把报告挤出屏幕。 */
+  .col-right>.ops-card{flex:0 1 390px;max-height:52%;display:flex;flex-direction:column}
+  .col-right>.ops-card>.body{overflow-y:auto;min-height:0}
+  .col-right>.reports-card{flex:1;display:flex;flex-direction:column;min-height:220px}
+  .col-right>.reports-card #repWrap{flex:1;overflow-y:auto;min-height:0}
 }
 /* 菜单树 / 运行日志 标题可以点开放大到整屏——分屏之后单块空间还是不够看的
    时候（比如菜单很多层、或者要盯着长长的日志看），点一下标题临时占满，
@@ -119,6 +122,16 @@ details.exec-opts[open]>summary{border-bottom:1px solid var(--line)}
 .exec-opts-body{padding:11px}
 .exec-opts-body .tag-filter{border:none;padding:0;background:none}
 .exec-opts-body .tag-filter+.tag-filter{margin-top:12px;padding-top:12px;border-top:1px solid var(--line)}
+/* 右侧操作区保持紧凑：三个主步骤仍全部可见，但减少重复留白和控件高度。 */
+.ops-card .body{padding:9px 12px}
+.ops-card .step+.step{margin-top:7px;padding-top:7px}
+.ops-card .step-h{margin-bottom:5px}
+.ops-card .row{margin-bottom:7px}
+.ops-card button:not(.icon-btn){padding:7px 10px}
+.ops-card .hint{margin-top:4px;line-height:1.35}
+.ops-card details.exec-opts{margin-top:6px}
+.ops-card details.exec-opts>summary{padding:7px 9px}
+.ops-card .exec-opts-body{padding:8px 9px}
 .tree{max-height:490px;overflow-y:auto}
 .grp{width:100%;text-align:left;display:flex;align-items:center;gap:6px;
   padding:8px 15px 8px;font:600 11px/1.55 inherit;letter-spacing:.06em;
@@ -285,7 +298,7 @@ a.open:hover{text-decoration:underline}
     </div>
   </div>
   <div class="col-right">
-    <div class="card">
+    <div class="card ops-card">
       <h2>操作<button class="icon-btn" type="button" id="btnMaxOps" style="margin-left:auto" title="放大到整屏">⤢</button></h2>
       <div class="body">
         <div class="step">
@@ -355,7 +368,7 @@ a.open:hover{text-decoration:underline}
         </div>
       </div>
     </div>
-    <div class="card">
+    <div class="card reports-card">
       <h2>历史报告 <span class="count" id="repCount"></span>
         <button class="icon-btn" type="button" id="btnMaxReports" style="margin-left:auto" title="放大到整屏">⤢</button></h2>
       <div id="repWrap"><div class="empty-state">还没有报告。</div></div>

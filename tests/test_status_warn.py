@@ -88,6 +88,25 @@ class RunStepStatusMappingTests(unittest.TestCase):
         self.assertEqual(Status.FAIL, r.status)
         self.assertEqual({"label": "x.xlsx", "path": "downloads/x.xlsx"}, r.detail["download"])
 
+    def test_failure_with_own_evidence_images_does_not_add_duplicate_screenshot(self):
+        @action("__test_fail_with_images_action")
+        def fail_with_images(ctx, **kw):
+            raise AssertionFailed(
+                "导出不一致",
+                detail={"images": [
+                    {"label": "列表页（完整列）", "path": "list.png"},
+                    {"label": "导出文件内容", "path": "export.png"},
+                ]},
+            )
+
+        ctx = FakeCtx()
+        r = run_step(ctx, Step("__test_fail_with_images_action", {}))
+
+        self.assertEqual(Status.FAIL, r.status)
+        self.assertIsNone(r.screenshot)
+        self.assertEqual([], ctx.shot_calls)
+        self.assertEqual(2, len(r.detail["images"]))
+
     def test_failure_without_detail_leaves_it_none(self):
         ctx = FakeCtx()
         r = run_step(ctx, Step("__test_fail_action", {}))

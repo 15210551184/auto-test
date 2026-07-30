@@ -121,6 +121,15 @@ class SearchRetryTests(unittest.TestCase):
         self.assertEqual("搜索后", detail["images"][1]["label"])
         self.assertEqual("screenshots/search_after.png", detail["images"][1]["path"])
 
+    def test_export_case_can_suppress_duplicate_search_screenshots(self):
+        ctx = FakeCtx(["ok"])
+        ctx.suppress_search_evidence = True
+
+        msg, detail = do_search(ctx)
+
+        self.assertEqual("执行搜索", msg)
+        self.assertIsNone(detail)
+
     def test_two_timeouts_raises(self):
         ctx = FakeCtx(["timeout", "timeout"])
         with self.assertRaises(PlaywrightTimeoutError):

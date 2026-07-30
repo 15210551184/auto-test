@@ -118,6 +118,12 @@ def verify_export(ctx, compare_with=None, columns=None, row_count_mode="total",
                   timeout=90000, header_match=True, sample=20) -> str:
     from .actions import AssertionFailed
 
+    # 导出证据的第一张图：下载前的真实列表页。Context.shot 会在宽表场景
+    # 临时扩大 viewport，确保横向滚动区里的列也进入同一张截图。
+    list_image = ctx.shot("export_list_page")
+    evidence_images = ([{"label": "列表页（完整列）", "path": list_image}]
+                       if list_image else [])
+
     mode = ctx.config.export_mode
     path = None
     if mode in ("direct", "auto"):
@@ -128,7 +134,8 @@ def verify_export(ctx, compare_with=None, columns=None, row_count_mode="total",
     if path is None:
         raise AssertionFailed(
             f"导出失败：{timeout}ms 内没拿到文件。"
-            f"若是异步导出请在配置里设 export_mode: async 并填 export_task_api"
+            f"若是异步导出请在配置里设 export_mode: async 并填 export_task_api",
+            detail={"images": evidence_images} if evidence_images else None,
         )
 
     size = os.path.getsize(path)
@@ -136,6 +143,15 @@ def verify_export(ctx, compare_with=None, columns=None, row_count_mode="total",
         raise AssertionFailed(f"导出文件为空: {path}")
 
     rows = _read_table(path)
+    file_image = ctx.table_preview_shot(
+        rows,
+        "export_file_content",
+        "导出文件内容",
+        source_name=Path(path).name,
+        max_rows=sample,
+    )
+    if file_image:
+        evidence_images.append({"label": "导出文件内容", "path": file_image})
     notes = [f"文件 {Path(path).name} ({size//1024}KB, {len(rows)} 行)"]
     problems = []
 
@@ -194,7 +210,8 @@ def verify_export(ctx, compare_with=None, columns=None, row_count_mode="total",
             problems.append("没有任何字段实际参与数据比对")
 
     download = {"label": f"导出文件 {Path(path).name}",
-               "path": os.path.relpath(path, ctx.report_root)}
+                "path": os.path.relpath(path, ctx.report_root)}
+    detail = {"download": download, "images": evidence_images}
     if problems:
         # 把导出文件本身挂到报告上：导出对不对，光看一句"缺少列 X/Y"判断不了
         # 是"导出真漏了"还是"页面表头识别多了"，直接把文件下下来打开看最快。
@@ -202,5 +219,5 @@ def verify_export(ctx, compare_with=None, columns=None, row_count_mode="total",
         # 都会自动截一张（StepResult.screenshot），再截一张只是重复。
         raise AssertionFailed(
             " | ".join(problems) + f"  [{'; '.join(notes)}]",
-            detail={"download": download})
-    return "导出验证通过 ✓ " + "; ".join(notes), {"download": download}
+            detail=detail)
+    return "导出验证通过 ✓ " + "; ".join(notes), detail

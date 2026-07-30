@@ -1,4 +1,5 @@
 """执行引擎：上下文、配置加载、用例编排"""
+import html
 import os
 import random
 import re
@@ -55,6 +56,9 @@ class Context:
         self.vars: Dict[str, Any] = dict(config.variables)
         self.data: Dict[str, List[dict]] = {}   # capture 存的表格快照
         self.last_api: Optional[dict] = None
+        # 导出用例由 export_and_verify 自己提供“列表完整列 + 文件内容”证据，
+        # 不再重复放一组没有意义的“搜索前/后”截图。
+        self.suppress_search_evidence = False
         self.console_errors: List[str] = []
         self.failed_requests: List[str] = []
         # 这条用例触发的接口调用（方法/URL/状态码/耗时/入参/响应），随
@@ -207,14 +211,121 @@ class Context:
 
         return re.sub(r"\$\{(\w+)\}", rep, value)
 
-    def shot(self, tag: str) -> str:
+    def _shot_path(self, tag: str) -> str:
         self._shot_n += 1
         safe = re.sub(r"[^\w\-]", "_", tag)[:40]
-        path = os.path.join(self.shots_dir, f"{self._shot_n:03d}_{safe}.png")
+        return os.path.join(self.shots_dir, f"{self._shot_n:03d}_{safe}.png")
+
+    def shot(self, tag: str) -> str:
+        """
+        截当前页面。页面里有横向滚动的数据表时，临时把 viewport 加宽到能
+        容纳表格全部列，避免截图只留下左半边；截图后立即恢复原尺寸。
+        """
+        path = self._shot_path(tag)
+        old_viewport = None
+        resized = False
         try:
+            # 宽表识别只是截图增强，页面没有表格、适配器不支持对应 API 时
+            # 仍应正常保存普通截图，不能因为增强逻辑失败把证据图整个丢掉。
+            try:
+                table = self.page.locator(self.selector("table")).first
+                if table.is_visible():
+                    metrics = table.evaluate("""el => {
+                      const nodes = [
+                        el,
+                        el.querySelector('.el-table__header-wrapper'),
+                        el.querySelector('.el-table__body-wrapper'),
+                        el.querySelector('.ant-table-content'),
+                        el.querySelector('.ant-table-body')
+                      ].filter(Boolean);
+                      return {
+                        scrollWidth: Math.max(...nodes.map(n => n.scrollWidth || 0)),
+                        clientWidth: Math.max(...nodes.map(n => n.clientWidth || 0))
+                      };
+                    }""")
+                    old_viewport = self.page.viewport_size
+                    extra = max(0, metrics["scrollWidth"] - metrics["clientWidth"])
+                    if old_viewport and extra > 8:
+                        self.page.set_viewport_size({
+                            "width": min(30000, old_viewport["width"] + extra + 32),
+                            "height": old_viewport["height"],
+                        })
+                        self.page.wait_for_timeout(120)
+                        resized = True
+            except Exception:
+                pass
             self.page.screenshot(path=path, full_page=False)
         except Exception:
             return ""
+        finally:
+            if resized and old_viewport:
+                try:
+                    self.page.set_viewport_size(old_viewport)
+                except Exception:
+                    pass
+        return os.path.relpath(path, self.report_root)
+
+    def table_preview_shot(self, rows: List[dict], tag: str, title: str,
+                           source_name: str = "", max_rows: int = 20) -> str:
+        """把 Excel/CSV 解析结果渲染成可读表格并截成一张完整列的图片。"""
+        if not rows:
+            return ""
+        path = self._shot_path(tag)
+        preview = None
+        try:
+            headers = list(rows[0].keys())
+            shown = rows[:max_rows]
+
+            def text(v):
+                return "" if v is None else str(v)
+
+            # 按内容估算每列宽度；中日韩字符按两个英文字符计算。
+            widths = []
+            for col in headers:
+                values = [str(col), *(text(r.get(col)) for r in shown)]
+                units = max(sum(2 if ord(ch) > 127 else 1 for ch in value)
+                            for value in values)
+                widths.append(min(360, max(88, units * 8 + 28)))
+            viewport_width = min(30000, max(960, sum(widths) + 42))
+
+            colgroup = "".join(f'<col style="width:{w}px">' for w in widths)
+            head = "".join(f"<th>{html.escape(str(h))}</th>" for h in headers)
+            body = "".join(
+                "<tr>" + "".join(
+                    f"<td>{html.escape(text(row.get(h)))}</td>" for h in headers
+                ) + "</tr>"
+                for row in shown
+            )
+            note = (f"{html.escape(source_name)} · 共 {len(rows)} 行"
+                    f" · 截图展示前 {len(shown)} 行")
+            markup = f"""<!doctype html><html><head><meta charset="utf-8"><style>
+              *{{box-sizing:border-box}} body{{margin:0;padding:20px;background:#f4f6f8;
+              color:#20242b;font:14px/1.45 -apple-system,BlinkMacSystemFont,
+              "PingFang SC","Microsoft YaHei",sans-serif}}
+              h1{{font-size:18px;margin:0 0 5px}} .note{{color:#7a8492;margin-bottom:14px}}
+              .sheet{{display:inline-block;background:#fff;border:1px solid #dfe3e8;
+              box-shadow:0 2px 10px rgba(0,0,0,.06)}} table{{border-collapse:collapse;
+              table-layout:fixed}} th,td{{padding:9px 11px;border-right:1px solid #e5e8ec;
+              border-bottom:1px solid #e5e8ec;text-align:left;white-space:nowrap;
+              overflow:hidden;text-overflow:ellipsis}} th{{background:#f2f4f7;
+              font-weight:600;position:sticky;top:0}} tr:nth-child(even) td{{background:#fafbfc}}
+            </style></head><body><h1>{html.escape(title)}</h1>
+            <div class="note">{note}</div><div class="sheet"><table>
+            <colgroup>{colgroup}</colgroup><thead><tr>{head}</tr></thead>
+            <tbody>{body}</tbody></table></div></body></html>"""
+
+            preview = self.page.context.new_page()
+            preview.set_viewport_size({"width": viewport_width, "height": 900})
+            preview.set_content(markup, wait_until="load")
+            preview.screenshot(path=path, full_page=True)
+        except Exception:
+            return ""
+        finally:
+            if preview is not None:
+                try:
+                    preview.close()
+                except Exception:
+                    pass
         return os.path.relpath(path, self.report_root)
 
     def reset_signals(self):
@@ -289,10 +400,13 @@ def run_step(ctx: Context, step: Step) -> StepResult:
         return StepResult(step.action, step.params, Status.WARN, str(e),
                           int((time.time() - t0) * 1000))
     except AssertionFailed as e:
+        detail = getattr(e, "detail", None)
+        # 动作已经提供专用证据图时，不再补一张重复的通用失败截图。
+        screenshot = None if detail and detail.get("images") else ctx.shot(
+            f"fail_{step.action}")
         return StepResult(step.action, step.params, Status.FAIL, str(e),
                           int((time.time() - t0) * 1000),
-                          screenshot=ctx.shot(f"fail_{step.action}"),
-                          detail=getattr(e, "detail", None))
+                          screenshot=screenshot, detail=detail)
     except Exception as e:
         return StepResult(step.action, step.params, Status.ERROR,
                           f"{type(e).__name__}: {e}",
@@ -308,6 +422,8 @@ def run_case(ctx: Context, case: Case) -> CaseResult:
 
     # 每条用例回到干净的页面状态，避免用例间互相污染
     ctx.reset_signals()
+    ctx.suppress_search_evidence = any(
+        step.action == "export_and_verify" for step in case.steps)
     frag = ctx.config.list_api
     if frag:
         # 等这次导航触发的列表接口真正返回，比固定等待更准；expect_response

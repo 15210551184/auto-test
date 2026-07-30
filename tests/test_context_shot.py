@@ -32,6 +32,36 @@ class FakePage:
         self.saved.append(path)
 
 
+class FakeWideTable:
+    first = None
+
+    def __init__(self):
+        self.first = self
+
+    def is_visible(self):
+        return True
+
+    def evaluate(self, script):
+        return {"scrollWidth": 1800, "clientWidth": 800}
+
+
+class FakeWidePage(FakePage):
+    def __init__(self):
+        super().__init__()
+        self.viewport_size = {"width": 1200, "height": 800}
+        self.viewport_changes = []
+
+    def locator(self, selector):
+        return FakeWideTable()
+
+    def set_viewport_size(self, size):
+        self.viewport_size = dict(size)
+        self.viewport_changes.append(dict(size))
+
+    def wait_for_timeout(self, ms):
+        pass
+
+
 class ShotPathTests(unittest.TestCase):
     """
     Context.shot() 存截图、返回一个相对路径给报告里的 <img src> 用。这个相对
@@ -74,6 +104,23 @@ class ShotPathTests(unittest.TestCase):
                          page_out, report_root=out_dir)
             rel = ctx.shot("fail_x")
             self.assertTrue(rel.startswith("01_某页面" + os.sep))
+
+    def test_wide_table_temporarily_expands_viewport_then_restores_it(self):
+        with tempfile.TemporaryDirectory() as out_dir:
+            page = FakeWidePage()
+            ctx = Context(page, PageConfig(name="x", url="http://x"), out_dir)
+
+            rel = ctx.shot("wide_table")
+
+            self.assertTrue(os.path.isfile(os.path.join(out_dir, rel)))
+            self.assertEqual(
+                {"width": 2232, "height": 800},
+                page.viewport_changes[0],
+            )
+            self.assertEqual(
+                {"width": 1200, "height": 800},
+                page.viewport_changes[-1],
+            )
 
 
 if __name__ == "__main__":

@@ -39,9 +39,17 @@ class FakeCtx:
         self.config = types.SimpleNamespace(export_mode=export_mode)
         self.data = {}
         self.shot_calls = []
+        self.preview_calls = []
 
     def shot(self, tag):
         self.shot_calls.append(tag)
+        return f"screenshots/{tag}.png"
+
+    def table_preview_shot(self, rows, tag, title, source_name="", max_rows=20):
+        self.preview_calls.append({
+            "rows": rows, "tag": tag, "title": title,
+            "source_name": source_name, "max_rows": max_rows,
+        })
         return f"screenshots/{tag}.png"
 
 
@@ -76,9 +84,12 @@ class ExportDetailAttachmentTests(unittest.TestCase):
         detail = cm.exception.detail
         self.assertEqual("导出文件 city_1785312571891.xlsx", detail["download"]["label"])
         self.assertEqual("city_1785312571891.xlsx", detail["download"]["path"])
-        # 页面截图不用在这里另外截——run_step() 对任何失败都会自动截一张，
-        # 这里再截就是重复的两张几乎一样的图。
-        self.assertEqual([], ctx.shot_calls)
+        self.assertEqual(
+            ["列表页（完整列）", "导出文件内容"],
+            [image["label"] for image in detail["images"]],
+        )
+        self.assertEqual(["export_list_page"], ctx.shot_calls)
+        self.assertEqual("export_file_content", ctx.preview_calls[0]["tag"])
 
     def test_download_path_relative_to_report_root(self):
         # 报告 html 跟下载文件不在同一目录时（批量执行常见），链接要相对
@@ -104,7 +115,10 @@ class ExportDetailAttachmentTests(unittest.TestCase):
 
         self.assertIn("导出验证通过", msg)
         self.assertEqual("city_1785312571891.xlsx", detail["download"]["path"])
-        self.assertEqual([], ctx.shot_calls)   # 通过不需要留截图，只留文件链接
+        self.assertEqual(2, len(detail["images"]))
+        self.assertEqual("列表页（完整列）", detail["images"][0]["label"])
+        self.assertEqual("导出文件内容", detail["images"][1]["label"])
+        self.assertEqual(["export_list_page"], ctx.shot_calls)
 
     def test_configured_columns_compare_values_beyond_first_five(self):
         # 页面第 7 个可比字段“加盟商”显示名称，而导出错误地写了内部 ID。
