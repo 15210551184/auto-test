@@ -11,6 +11,7 @@
 import json
 import os
 import re
+import time
 from typing import Any, Dict, List, Optional
 from urllib.parse import urlparse
 
@@ -21,6 +22,54 @@ from .adapters.element_ui import ElementUIAdapter
 from .i18n_terms import words as _i18n_words
 from .login import ensure_logged_in
 from .state import save_storage_state, valid_storage_state
+
+
+def _wait_for_scan_ready(page: Page, max_wait_ms: int = 3000) -> int:
+    """
+    等列表真正可扫描，而不是无条件睡满 3 秒。
+
+    ``domcontentloaded`` 对 Vue/React 后台页远远不够：组件和列表接口通常还
+    在后面异步渲染；但固定等待又让本来 300ms 就完成的页面每次白等。这里
+    等到“表头已经出现，且已有数据行或明确显示空状态”，其次接受已经渲染
+    出搜索表单的页面。到时仍没信号才走满原来的等待预算，准确率不倒退。
+    """
+    started = time.monotonic()
+    timeout = max(100, int(max_wait_ms))
+    try:
+        page.wait_for_function(
+            """() => {
+                const visible = el => {
+                    if (!el) return false;
+                    const s = getComputedStyle(el);
+                    const r = el.getBoundingClientRect();
+                    return s.display !== 'none' && s.visibility !== 'hidden'
+                        && r.width > 0 && r.height > 0;
+                };
+                const tables = [...document.querySelectorAll(
+                    '.el-table, .ant-table, table.data-table, table')].filter(visible);
+                const tableReady = tables.some(t => {
+                    const headers = t.querySelectorAll(
+                        '.el-table__header-wrapper th, .ant-table-thead th, thead th');
+                    const rows = t.querySelectorAll(
+                        '.el-table__body-wrapper tr.el-table__row, .ant-table-tbody tr, tbody tr');
+                    const empty = t.querySelector(
+                        '.el-table__empty-block, .ant-empty, .el-empty');
+                    const loading = [...t.querySelectorAll(
+                        '.el-loading-mask, .ant-spin-spinning')].some(visible);
+                    return !loading && headers.length > 0
+                        && (rows.length > 0 || visible(empty));
+                });
+                return tableReady;
+            }""",
+            timeout=timeout,
+            polling=100,
+        )
+        # 就绪信号出现后给同一轮 Vue patch/表格布局一个很短的收尾窗口。
+        page.wait_for_timeout(150)
+    except Exception:
+        # wait_for_function 已经消耗完整预算，不再额外固定等待一次。
+        pass
+    return int((time.monotonic() - started) * 1000)
 
 
 class PageScanner:
@@ -126,7 +175,10 @@ class PageScanner:
         for i, f in enumerate(fields):
             if f["type"] != "select" or f.get("options"):
                 continue
-            for parent in fields[:i]:
+            # 级联父级通常紧挨在子级前面（国家→城市→区域）。从最近的字段
+            # 往前试，常见情况一次命中；原来从表单第一个下拉开始试，字段
+            # 多时会先做许多无效选择和 500ms 等待。
+            for parent in reversed(fields[:i]):
                 if parent["type"] != "select" or not parent.get("options"):
                     continue
                 candidates = [o for o in parent["options"] if o not in placeholder]
@@ -165,13 +217,38 @@ class PageScanner:
         选项处理（本来也生成不出可用的筛选用例），别在一个下拉上死等半分钟。
         """
         try:
-            item.locator(".el-select").first.click(timeout=3000)
+            select = item.locator(".el-select").first
+
+            # Element UI/Plus 通常已把下拉项渲染到 body 的 popper 中，只是隐藏
+            # 起来；input 的 aria-controls/aria-owns 能直接定位它。直接读取可
+            # 省掉每个下拉 300ms 展开 + 150ms 收起的固定等待。
+            control = select.locator("input").first
+            if control.count() == 0:
+                return []
+            cls = select.get_attribute("class") or ""
+            disabled = control.get_attribute("disabled")
+            aria_disabled = control.get_attribute("aria-disabled")
+            if "is-disabled" in cls or disabled is not None or aria_disabled == "true":
+                return []
+
+            popper_ids = ((control.get_attribute("aria-controls") or "") + " "
+                          + (control.get_attribute("aria-owns") or "")).split()
+            for popper_id in dict.fromkeys(popper_ids):
+                safe_id = popper_id.replace("\\", "\\\\").replace('"', '\\"')
+                opts = [o.strip() for o in self.page.locator(
+                    f'[id="{safe_id}"] .el-select-dropdown__item'
+                ).all_inner_texts() if o.strip()]
+                if opts:
+                    return opts[:15]
+
+            # disabled 控件让 Playwright 重试到 timeout 才失败；级联页面里多个
+            # disabled 下拉会各白等 3 秒。明确禁用就立即交给级联解析器处理。
+            select.click(timeout=1500)
             self.page.wait_for_timeout(300)
             dd = self.page.locator(".el-select-dropdown:visible").last
             opts = [o.strip() for o in
                     dd.locator(".el-select-dropdown__item").all_inner_texts()]
             self.page.keyboard.press("Escape")
-            self.page.wait_for_timeout(150)
             return opts[:15]
         except Exception:
             return []
@@ -675,7 +752,9 @@ def _merge_positional(variants: Dict[str, Dict[str, str]], canonical: List[str],
 def scan(url: str, storage_state: Optional[str] = None,
          headless: bool = True, wait: int = 3000,
          languages: Optional[Dict[str, Any]] = None,
-         login: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+         login: Optional[Dict[str, Any]] = None,
+         include_crud: bool = True,
+         include_i18n: bool = True) -> Dict[str, Any]:
     """
     传了 login 就走懒登录（cookie 还有效就直接用，过期了才真正登录一次并
     把新 cookie 存回去）——不传就是纯用 storage_state 里的 cookie，cookie
@@ -685,7 +764,10 @@ def scan(url: str, storage_state: Optional[str] = None,
     接口），生成一份看着能跑、实际全是空壳的配置——不报错，比直接失败更
     危险，因为不会有人第一时间发现这份配置是废的。
     """
+    scan_started = time.monotonic()
+    timings: Dict[str, int] = {}
     with sync_playwright() as pw:
+        phase_started = time.monotonic()
         browser = B.launch(pw, headless=headless)
         args = B.context_args()
         state = valid_storage_state(storage_state)
@@ -700,35 +782,49 @@ def scan(url: str, storage_state: Optional[str] = None,
                 save_storage_state(bctx, storage_state)
         else:
             page.goto(url, wait_until="domcontentloaded", timeout=60000)
-        # 曾经改成"等到第一个 api/json 响应就继续"想省点时间，结果翻车：
-        # 页面进来常先打几个无关请求（权限校验/字典/当前用户），一旦命中这种
-        # 早到的响应，只再等一点点就去扫表单/按钮，搜索框、筛选项、导出按钮
-        # 经常还没渲染完，扫描直接漏掉——生成的用例看着正常，实际少了一大半。
-        # 扫描只跑一次，慢 1-2 秒不影响体验，但扫漏了没人会发现，代价划不来。
-        # 老老实实固定等，用等待换正确性。
-        page.wait_for_timeout(wait)
+        ready_ms = _wait_for_scan_ready(page, wait)
+        timings["页面加载"] = int((time.monotonic() - phase_started) * 1000)
+        timings["就绪等待"] = ready_ms
 
+        phase_started = time.monotonic()
         table = sc.scan_table()
+        timings["表格"] = int((time.monotonic() - phase_started) * 1000)
+        phase_started = time.monotonic()
+        form_fields = sc.scan_form()
+        timings["筛选项"] = int((time.monotonic() - phase_started) * 1000)
+        phase_started = time.monotonic()
+        buttons = sc.scan_buttons()
+        pagination = sc.scan_pagination()
+        list_api = sc.guess_list_api(sample_row=table.get("sample_row"))
+        timings["按钮/分页/API"] = int((time.monotonic() - phase_started) * 1000)
         report = {
             "url": url,
             "title": page.title(),
-            "form_fields": sc.scan_form(),
+            "form_fields": form_fields,
             "table": table,
-            "buttons": sc.scan_buttons(),
-            "pagination": sc.scan_pagination(),
-            "list_api": sc.guess_list_api(sample_row=table.get("sample_row")),
+            "buttons": buttons,
+            "pagination": pagination,
+            "list_api": list_api,
         }
         # 表单结构放最后扫：它要点开弹窗，对页面状态的改动最大，
         # 放前面会影响表格/按钮的识别
-        if report["buttons"].get("create"):
+        if include_crud and report["buttons"].get("create"):
+            phase_started = time.monotonic()
             report["create_form"] = sc.scan_form_schema()
+            timings["CRUD表单"] = int((time.monotonic() - phase_started) * 1000)
         # 多语言合并放最后：要来回切换语言、重新扫表单/表头，对页面状态
         # 改动更大，放前面会干扰上面这些默认语言下的扫描结果
-        label_variants, header_variants = sc.scan_language_variants(languages, report)
+        label_variants, header_variants = ({}, {})
+        if include_i18n:
+            phase_started = time.monotonic()
+            label_variants, header_variants = sc.scan_language_variants(languages, report)
+            timings["多语言"] = int((time.monotonic() - phase_started) * 1000)
         if label_variants:
             report["label_variants"] = label_variants
         if header_variants:
             report["header_variants"] = header_variants
+        timings["总计"] = int((time.monotonic() - scan_started) * 1000)
+        report["scan_timings_ms"] = timings
         browser.close()
     return report
 
@@ -762,7 +858,7 @@ def redetect_list_api(url: str, storage_state: Optional[str] = None,
                 save_storage_state(bctx, storage_state)
         else:
             page.goto(url, wait_until="domcontentloaded", timeout=60000)
-        page.wait_for_timeout(wait)
+        _wait_for_scan_ready(page, wait)
         table = sc.scan_table()
         api = sc.guess_list_api(sample_row=table.get("sample_row"))
         browser.close()

@@ -19,6 +19,8 @@ Playwright 的同步 API 不支持跨线程共享同一个 Playwright/Browser �
 Chromium 进程"而不是"一个进程开多个 tab"，concurrency 调大之前务必确认
 服务器内存够用。
 """
+import hashlib
+import json
 import os
 import threading
 import time
@@ -61,6 +63,9 @@ DEFAULT_CONCURRENCY = 2
 # 进度自然错开，不需要一直错峰。
 STAGGER_DELAY_SEC = 2
 
+# 修改扫描报告结构或 scanner 的识别语义时递增，使旧缓存自动失效。
+SCAN_CACHE_VERSION = 2
+
 
 def _log(cb, msg):
     print(msg, flush=True)
@@ -81,7 +86,8 @@ def _scan_timeout_for(languages: Optional[Dict], base: int = SCAN_TIMEOUT_SEC) -
 
 
 def _scan_with_timeout(url: str, storage_state: Optional[str], timeout: int = SCAN_TIMEOUT_SEC,
-                       languages: Optional[Dict] = None, login: Optional[Dict] = None) -> Dict:
+                       languages: Optional[Dict] = None, login: Optional[Dict] = None,
+                       include_crud: bool = True, include_i18n: bool = True) -> Dict:
     """
     在子线程里跑 scanner.scan()，超时就放弃等待、把这一页判失败，不拖死整批任务。
 
@@ -96,7 +102,9 @@ def _scan_with_timeout(url: str, storage_state: Optional[str], timeout: int = SC
     def worker():
         try:
             box["report"] = scanner.scan(url, storage_state=storage_state, headless=True,
-                                         languages=languages, login=login)
+                                         languages=languages, login=login,
+                                         include_crud=include_crud,
+                                         include_i18n=include_i18n)
         except Exception as e:
             box["error"] = e
 
@@ -110,9 +118,52 @@ def _scan_with_timeout(url: str, storage_state: Optional[str], timeout: int = SC
     return box["report"]
 
 
+def _language_fingerprint(languages: Optional[Dict]) -> str:
+    raw = json.dumps(languages or {}, ensure_ascii=False, sort_keys=True,
+                     separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(raw).hexdigest()[:16]
+
+
+def _load_scan_cache(path: Path, url: str, languages: Optional[Dict],
+                     include_crud: bool, include_i18n: bool) -> Optional[Dict]:
+    """读取能力足够的缓存；较完整的缓存可以服务较轻量的生成请求。"""
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, TypeError):
+        return None
+    if data.get("version") != SCAN_CACHE_VERSION or data.get("url") != url:
+        return None
+    capabilities = data.get("capabilities") or {}
+    if include_crud and not capabilities.get("crud"):
+        return None
+    if include_i18n:
+        if not capabilities.get("i18n"):
+            return None
+        if data.get("language_fingerprint") != _language_fingerprint(languages):
+            return None
+    report = data.get("report")
+    return report if isinstance(report, dict) else None
+
+
+def _save_scan_cache(path: Path, url: str, languages: Optional[Dict], report: Dict,
+                     include_crud: bool, include_i18n: bool) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "version": SCAN_CACHE_VERSION,
+        "url": url,
+        "language_fingerprint": _language_fingerprint(languages),
+        "capabilities": {"crud": include_crud, "i18n": include_i18n},
+        "scanned_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+        "report": report,
+    }
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
 def scan_selected(dir_name: str, storage_state: Optional[str] = None,
                   on_log: Callable = None, overwrite: bool = False,
-                  concurrency: int = DEFAULT_CONCURRENCY) -> Dict:
+                  concurrency: int = DEFAULT_CONCURRENCY,
+                  force_scan: bool = False,
+                  only_tags: Optional[List[str]] = None) -> Dict:
     """
     给勾选的页面批量生成配置，最多 concurrency 个页面并发扫描。
     已有配置默认跳过，避免覆盖用户手工补的业务断言 —— 这点很重要，
@@ -131,16 +182,21 @@ def scan_selected(dir_name: str, storage_state: Optional[str] = None,
         raise ValueError("没有勾选任何页面")
 
     concurrency = max(1, min(concurrency, len(pages)))
-    _log(on_log, f"开始扫描 {len(pages)} 个页面（并发 {concurrency}）")
-    counters = {"made": 0, "skipped": 0, "failed": 0, "done": 0}
+    requested_tags = set(only_tags or [])
+    scan_all = not requested_tags
+    include_crud = scan_all or "crud" in requested_tags
+    include_i18n = scan_all or "i18n" in requested_tags
+    mode = "强制扫描" if force_scan else "缓存优先"
+    _log(on_log, f"开始生成 {len(pages)} 个页面（{mode}，浏览器并发 {concurrency}）")
+    counters = {"made": 0, "cached": 0, "scanned": 0,
+                "skipped": 0, "failed": 0, "done": 0}
     lock = threading.Lock()
 
     def scan_one(i: int, pg: Dict) -> None:
         name, url = pg["name"], pg.get("url")
         tag = f"[{name}]"
-        if i <= concurrency:
-            time.sleep((i - 1) * STAGGER_DELAY_SEC)   # 错开并发起步的高峰，理由同 run_selected
         dest = P.page_config_path(dir_name, name)
+        cache_path = P.scan_cache_path(dir_name, name)
 
         def finish(kind: str) -> None:
             with lock:
@@ -158,15 +214,39 @@ def scan_selected(dir_name: str, storage_state: Optional[str] = None,
             return
 
         try:
-            _log(on_log, f"{tag} 扫描中…")
-            # 个别页面（大量级联下拉、地图选点、"新增"弹窗字段特别多）扫描
-            # 本来就比一般页面慢，不该为了它们把所有页面的超时都调大——
-            # 项目设置里给这一页单独加 scan_timeout（秒）就行，不给就用
-            # 全局默认的 SCAN_TIMEOUT_SEC。
-            page_timeout = pg.get("scan_timeout") or SCAN_TIMEOUT_SEC
-            rep = _scan_with_timeout(url, storage_state, timeout=page_timeout,
-                                     languages=proj.get("languages"),
-                                     login=proj.get("login"))
+            rep = None
+            if not force_scan:
+                rep = _load_scan_cache(cache_path, url, proj.get("languages"),
+                                       include_crud, include_i18n)
+            if rep is not None:
+                _log(on_log, f"{tag} 命中页面结构缓存，正在生成 YAML…")
+                with lock:
+                    counters["cached"] += 1
+            else:
+                reason = "已要求强制刷新" if force_scan else "没有可用缓存"
+                _log(on_log, f"{tag} {reason}，启动浏览器扫描…")
+                # 缓存命中不应该为了浏览器限流白等；只有真正启动浏览器的
+                # 第一批任务才需要错峰，快速重新生成应当立即完成。
+                if i <= concurrency:
+                    time.sleep((i - 1) * STAGGER_DELAY_SEC)
+                # 个别页面（大量级联下拉、地图选点、"新增"弹窗字段特别多）扫描
+                # 本来就比一般页面慢，不该为了它们把所有页面的超时都调大——
+                # 项目设置里给这一页单独加 scan_timeout（秒）就行，不给就用
+                # 全局默认的 SCAN_TIMEOUT_SEC。
+                page_timeout = pg.get("scan_timeout") or SCAN_TIMEOUT_SEC
+                rep = _scan_with_timeout(url, storage_state, timeout=page_timeout,
+                                         languages=proj.get("languages"),
+                                         login=proj.get("login"),
+                                         include_crud=include_crud,
+                                         include_i18n=include_i18n)
+                _save_scan_cache(cache_path, url, proj.get("languages"), rep,
+                                 include_crud, include_i18n)
+                with lock:
+                    counters["scanned"] += 1
+                timings = rep.get("scan_timings_ms") or {}
+                if timings:
+                    detail = "，".join(f"{k} {v}ms" for k, v in timings.items())
+                    _log(on_log, f"{tag} 扫描耗时：{detail}")
             cfg = scanner.to_config(rep, name=name, languages=proj.get("languages"))
             cfg = P.inject_project_settings(cfg, proj)
             dest.parent.mkdir(parents=True, exist_ok=True)
@@ -185,8 +265,9 @@ def scan_selected(dir_name: str, storage_state: Optional[str] = None,
         for f in as_completed(futures):
             f.result()   # worker 内部没兜住的异常在这里重新抛出，不悄悄吞掉
 
-    _log(on_log, f"扫描完成：新建 {counters['made']}，跳过 {counters['skipped']}，失败 {counters['failed']}")
-    return {"made": counters["made"], "skipped": counters["skipped"], "failed": counters["failed"]}
+    _log(on_log, f"生成完成：写入 {counters['made']}，缓存命中 {counters['cached']}，"
+                 f"浏览器扫描 {counters['scanned']}，跳过 {counters['skipped']}，失败 {counters['failed']}")
+    return {k: counters[k] for k in ("made", "cached", "scanned", "skipped", "failed")}
 
 
 def redetect_list_api(dir_name: str, page_name: str,

@@ -324,9 +324,10 @@ a.open:hover{text-decoration:underline}
           <div class="step-h">2 · 生成用例</div>
           <div class="row btns fill">
             <button id="btnGen">生成用例</button>
-            <button id="btnRegen">重新生成用例</button>
+            <button id="btnRegen">重新生成 YAML</button>
+            <button id="btnRescan">重新扫描并生成</button>
           </div>
-          <div class="hint" title="「生成用例」不会覆盖已有 YAML；「重新生成用例」会覆盖当前已勾选页面的 YAML。">生成不覆盖已有配置；重新生成会覆盖</div>
+          <div class="hint" title="重新生成 YAML 优先使用页面结构缓存；只有页面结构确实改变时才需要重新扫描。">重新生成走缓存；页面改版后再重新扫描</div>
         </div>
         <div class="step">
           <div class="step-h">3 · 执行测试</div>
@@ -349,7 +350,7 @@ a.open:hover{text-decoration:underline}
               </div>
               <div class="tag-filter">
                 <div class="tf-title">
-                  只执行勾选的类别<span class="tf-hint">（都不选 = 全部一起跑；想漏掉一两类，点"全选"再取消勾选它们）</span>
+                  只执行勾选的类别<span class="tf-hint">（生成时也会跳过未勾选的 CRUD/多语言深度扫描；都不选 = 全部）</span>
                   <button class="link sm" type="button" id="btnTagAll" style="margin-left:auto">全选</button>
                   <button class="link sm" type="button" id="btnTagNone">清空</button>
                 </div>
@@ -858,7 +859,7 @@ function selectedTags(){
 $('#btnTagAll').onclick=()=>{document.querySelectorAll('[data-tagf]').forEach(el=>el.checked=true);updateExecOptsBadge();};
 $('#btnTagNone').onclick=()=>{document.querySelectorAll('[data-tagf]').forEach(el=>el.checked=false);updateExecOptsBadge();};
 $('#execOpts').addEventListener('change',updateExecOptsBadge);
-async function trigger(action, overwrite=false){
+async function trigger(action, overwrite=false, forceScan=false){
   if(!proj) return toast('请先选择或新建一个系统',true);
   const sel=pages.filter(p=>p.selected);
   if((action==='batch-scan'||action==='batch-run')&&!sel.length)
@@ -866,6 +867,11 @@ async function trigger(action, overwrite=false){
   if(action==='batch-run'&&!sel.some(p=>p.has_config))
     return toast('勾选的页面还没有用例，请先点「生成用例」',true);
   const body={action:action,project:proj.dir,overwrite:overwrite};
+  if(action==='batch-scan'){
+    body.force_scan=forceScan;
+    const tags=selectedTags();
+    if(tags.length) body.tags=tags;
+  }
   if(action==='batch-run'){
     const tags=selectedTags();
     if(tags.length) body.tags=tags;   // 都不选就不传 tags，后端默认跑全部
@@ -878,13 +884,14 @@ async function trigger(action, overwrite=false){
 }
 $('#btnDiscover').onclick=()=>trigger('discover');
 $('#btnGen').onclick=()=>trigger('batch-scan');
-$('#btnRegen').onclick=()=>{if(confirm('重新生成会覆盖当前已勾选页面的 YAML 手工修改，确定继续吗？'))trigger('batch-scan',true);};
+$('#btnRegen').onclick=()=>{if(confirm('将使用页面结构缓存重新生成并覆盖当前已勾选页面的 YAML，确定继续吗？'))trigger('batch-scan',true);};
+$('#btnRescan').onclick=()=>{if(confirm('这会重新打开浏览器扫描页面并覆盖 YAML，页面结构确实改变了吗？'))trigger('batch-scan',true,true);};
 $('#btnRunSel').onclick=()=>trigger('batch-run');
 $('#btnStop').onclick=async()=>{const r=await post('/api/stop');
   toast(r.data.ok?'已发送终止信号':'当前没有运行中的任务',!r.data.ok);};
 $('#btnClear').onclick=()=>{term.innerHTML='<span class="empty">日志已清空。</span>';everStreamed=false;hideProgress();resetLogs();};
 function setBusy(b){
-  ['#btnDiscover','#btnGen','#btnRegen','#btnRunSel','#btnNewProj','#yamlProbeLang'].forEach(s=>$(s).disabled=b);
+  ['#btnDiscover','#btnGen','#btnRegen','#btnRescan','#btnRunSel','#btnNewProj','#yamlProbeLang'].forEach(s=>$(s).disabled=b);
   $('#btnStop').disabled=!b;
   if(b) setState('busy','执行中');
 }

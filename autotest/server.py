@@ -424,6 +424,10 @@ def api_run():
         cmd = [PY, "cli.py", verb, d]
         if action == "batch-scan" and body.get("overwrite"):
             cmd.append("--overwrite")
+        if action == "batch-scan" and body.get("force_scan"):
+            cmd.append("--force-scan")
+        if action == "batch-scan" and body.get("tags"):
+            cmd += ["--tags"] + body["tags"]
         if action == "batch-run" and body.get("tags"):
             cmd += ["--tags"] + body["tags"]
         if action == "batch-run" and body.get("exclude_tags"):

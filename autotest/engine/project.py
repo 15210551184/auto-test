@@ -134,6 +134,11 @@ def page_config_path(dir_name: str, page_name: str) -> Path:
     return PROJECTS_DIR / _safe(dir_name) / "pages" / f"{_safe(page_name)}.yaml"
 
 
+def scan_cache_path(dir_name: str, page_name: str) -> Path:
+    """页面结构扫描缓存。与 YAML 分开，重新生成时不会再启动浏览器。"""
+    return PROJECTS_DIR / _safe(dir_name) / "scan-cache" / f"{_safe(page_name)}.json"
+
+
 def project_yaml_path(dir_name: str) -> Path:
     return PROJECTS_DIR / _safe(dir_name) / "project.yaml"
 
@@ -153,6 +158,9 @@ def remove_page(dir_name: str, page_name: str) -> bool:
     config = page_config_path(dir_name, page_name)
     if config.is_file():
         config.unlink()
+    cache = scan_cache_path(dir_name, page_name)
+    if cache.is_file():
+        cache.unlink()
     return True
 
 
@@ -173,6 +181,9 @@ def remove_pages(dir_name: str, page_names: List[str]) -> int:
         config = page_config_path(dir_name, item["name"])
         if config.is_file():
             config.unlink()
+        cache = scan_cache_path(dir_name, item["name"])
+        if cache.is_file():
+            cache.unlink()
     return len(removed)
 
 

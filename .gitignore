@@ -3,3 +3,5 @@
 __pycache__/
 *.pyc
 .DS_Store
+# 页面结构扫描缓存是运行时数据；项目配置/YAML 仍可按需提交。
+autotest/projects/*/scan-cache/

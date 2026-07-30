@@ -122,7 +122,8 @@ def cmd_menu(a):
 def cmd_batch_scan(a):
     """给勾选的页面批量生成配置"""
     batch.scan_selected(a.project, storage_state=a.state, overwrite=a.overwrite,
-                        concurrency=a.concurrency)
+                        concurrency=a.concurrency, force_scan=a.force_scan,
+                        only_tags=a.tags)
 
 
 def cmd_batch_run(a):
@@ -264,6 +265,10 @@ def main():
     s7 = sub.add_parser("batch-scan", help="给勾选页面批量生成配置")
     s7.add_argument("project")
     s7.add_argument("--overwrite", action="store_true", help="覆盖已有配置")
+    s7.add_argument("--force-scan", action="store_true",
+                    help="忽略页面结构缓存，重新打开浏览器扫描")
+    s7.add_argument("--tags", nargs="*",
+                    help="按执行类别跳过未勾选的 CRUD/多语言深度扫描")
     s7.add_argument("--concurrency", type=int, default=batch.DEFAULT_CONCURRENCY,
                     help=f"并发扫描几个页面，默认 {batch.DEFAULT_CONCURRENCY}")
     s7.set_defaults(func=cmd_batch_scan)
