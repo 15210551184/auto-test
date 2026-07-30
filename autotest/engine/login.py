@@ -45,6 +45,7 @@ SUBMIT_SELECTORS = [
 
 # 判断"当前是不是在登录页"的特征
 LOGIN_PAGE_HINTS = ["login", "signin", "sign-in", "auth", "passport"]
+LOGIN_PASSWORD_PROBE_TIMEOUT_MS = 500
 
 
 class LoginError(Exception):
@@ -76,8 +77,13 @@ def is_login_page(page: Page) -> bool:
     if any(h in url for h in LOGIN_PAGE_HINTS):
         return True
     try:
-        pw = page.locator("input[type='password']")
-        return pw.count() > 0 and pw.first.is_visible()
+        # locator.count() 没有动作超时：渲染进程繁忙或页面脚本卡住时可能一直
+        # 等协议响应，菜单扫描曾在“司机管理”这里停了数分钟。wait_for 有
+        # Playwright 驱动侧的严格超时；业务页通常没有密码框，500ms 后直接
+        # 判定为非登录页，不让一个辅助判断拖死整批任务。
+        pw = page.locator("input[type='password']").first
+        pw.wait_for(state="attached", timeout=LOGIN_PASSWORD_PROBE_TIMEOUT_MS)
+        return pw.is_visible()
     except Exception:
         return False
 

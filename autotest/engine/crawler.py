@@ -440,6 +440,7 @@ def _visit_and_probe(page: Page, target_url: str, on_progress=None):
         url = probe_page.url
         elapsed = time.monotonic() - started
         _progress(on_progress, f"  页面已打开（{elapsed:.1f}s），正在识别表格和操作能力…")
+        _progress(on_progress, "    检查页面登录状态…")
         if is_login_page(probe_page):
             return url, {}, True
         return url, _probe_page(probe_page, on_progress), False
@@ -470,39 +471,47 @@ def _wait_for_probe_structure(page: Page) -> bool:
 def _probe_page(page: Page, on_progress=None) -> Dict:
     """粗略判断这一页值不值得测"""
     table = None
+    header_texts: List[str] = []
     _progress(on_progress, "    识别数据表格…")
-    try:
-        candidates = page.locator(".el-table, .ant-table, table.data-table, table")
-        for i in range(min(candidates.count(), 8)):
-            candidate = candidates.nth(i)
-            if not candidate.is_visible():
-                continue
+    # 不使用 locator.count()/all_inner_texts()：这两个读取没有动作超时，
+    # 渲染进程繁忙时可能永久等待。逐种框架找第一个可见表格，每次有严格预算。
+    for selector in (".el-table", ".ant-table", "table.data-table", "table"):
+        try:
+            candidate = page.locator(f"{selector}:visible").first
+            candidate.wait_for(state="visible", timeout=700)
             header_locs = candidate.locator(
                 ".el-table__header-wrapper th .cell, .ant-table-thead th, thead th")
-            headers = []
-            for j in range(min(header_locs.count(), 50)):
+            texts = []
+            # 不先 count，直接按上限逐个取；越界的 nth 在 500ms 内失败即结束。
+            for j in range(50):
                 try:
-                    headers.append(header_locs.nth(j).inner_text(timeout=1200))
+                    text = header_locs.nth(j).inner_text(timeout=500).strip()
+                    if text:
+                        texts.append(text)
                 except Exception:
-                    continue
-            if any(h.strip() for h in headers):
+                    break
+            if texts:
                 table = candidate
+                # Element UI 固定列会复制一份表头 DOM；菜单地图显示真实业务
+                # 列数，不把固定列副本重复计算（日志里曾出现实际约 15 列却报
+                # 30 列、21 列却报 42 列）。
+                header_texts = list(dict.fromkeys(texts))
                 break
-    except Exception:
-        table = None
+        except Exception:
+            continue
     has_table = table is not None
 
     cols, rows = 0, 0
     if has_table:
+        cols = len(header_texts)
         try:
-            cols = len([t for t in table.locator(
-                ".el-table__header-wrapper th .cell, .ant-table-thead th, thead th"
-            ).all_inner_texts() if t.strip()])
-            rows = table.locator(
+            first_row = table.locator(
                 ".el-table__body-wrapper tbody tr.el-table__row, .ant-table-tbody tr, tbody tr"
-            ).count()
+            ).first
+            first_row.wait_for(state="attached", timeout=500)
+            rows = 1  # 菜单地图只关心是否有数据；实际行数没有消费者。
         except Exception:
-            pass
+            rows = 0
 
     def has_btn(*words):
         selectors = []
@@ -510,7 +519,11 @@ def _probe_page(page: Page, on_progress=None) -> Dict:
             safe = word.replace("\\", "\\\\").replace("'", "\\'")
             selectors.extend((f"button:has-text('{safe}')", f"a:has-text('{safe}')"))
         try:
-            return bool(selectors and page.locator(", ".join(selectors)).count())
+            if not selectors:
+                return False
+            page.locator(", ".join(selectors)).first.wait_for(
+                state="attached", timeout=350)
+            return True
         except Exception:
             return False
 
