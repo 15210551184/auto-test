@@ -24,6 +24,10 @@ from .login import ensure_logged_in
 from .state import save_storage_state, valid_storage_state
 
 
+FORM_OPTION_PROBE_BUDGET_MS = 5000
+FORM_OPTION_CLICK_TIMEOUT_MS = 700
+
+
 def _wait_for_scan_ready(page: Page, max_wait_ms: int = 3000) -> int:
     """
     等列表真正可扫描，而不是无条件睡满 3 秒。
@@ -94,31 +98,79 @@ class PageScanner:
 
     # ---------- 表单识别 ----------
     def scan_form(self) -> List[Dict[str, Any]]:
-        fields = []
+        # 原实现对每个 form-item 分别 count()/inner_text()/get_attribute()，并逐
+        # 个点开下拉。一个 10 个筛选项的页面会产生上百次浏览器往返；空下拉
+        # 再进入级联回溯后，整页稳定耗时 30~35 秒。这里一次 evaluate_all()
+        # 把标签、类型、placeholder 以及已挂载 popper 的选项一起取回。
         items = self.page.locator(".el-form-item")
-        for i in range(items.count()):
-            item = items.nth(i)
-            try:
-                label = item.locator(".el-form-item__label").first.inner_text().strip()
-            except Exception:
-                continue
-            label = label.rstrip(":：").strip()
-            if not label:
-                continue
+        try:
+            fields = items.evaluate_all(
+                """items => items.map((item, index) => {
+                    const clean = s => (s || '').trim()
+                        .replace(/[：:]\\s*$/, '').trim();
+                    const label = clean(item.querySelector(
+                        '.el-form-item__label')?.textContent);
+                    if (!label) return null;
+                    const date = item.querySelector('.el-date-editor');
+                    const select = item.querySelector('.el-select');
+                    const input = item.querySelector('.el-input__inner');
+                    if (date) {
+                        return {label, type: item.querySelector('.el-range-input')
+                            ? 'date_range' : 'date', _index: index};
+                    }
+                    if (select) {
+                        const control = select.querySelector('input');
+                        const ids = [
+                            control?.getAttribute('aria-controls'),
+                            control?.getAttribute('aria-owns')
+                        ].filter(Boolean).flatMap(v => v.split(/\\s+/));
+                        const options = [];
+                        [...new Set(ids)].forEach(id => {
+                            const popper = document.getElementById(id);
+                            popper?.querySelectorAll(
+                                '.el-select-dropdown__item'
+                            ).forEach(o => {
+                                const text = clean(o.textContent);
+                                if (text && !options.includes(text)) options.push(text);
+                            });
+                        });
+                        return {
+                            label, type: 'select', options: options.slice(0, 15),
+                            _index: index,
+                            _disabled: select.classList.contains('is-disabled')
+                                || control?.disabled
+                                || control?.getAttribute('aria-disabled') === 'true'
+                        };
+                    }
+                    if (input) {
+                        return {label, type: 'text',
+                            placeholder: input.getAttribute('placeholder') || '',
+                            _index: index};
+                    }
+                    return null;
+                }).filter(Boolean)"""
+            )
+        except Exception:
+            fields = []
 
-            kind, extra = "text", {}
-            if item.locator(".el-date-editor").count() > 0:
-                kind = "date_range" if item.locator(".el-range-input").count() > 0 else "date"
-            elif item.locator(".el-select").count() > 0:
-                kind = "select"
-                extra["options"] = self._peek_options(item)
-            elif item.locator(".el-input__inner").count() > 0:
-                ph = item.locator(".el-input__inner").first.get_attribute("placeholder") or ""
-                extra["placeholder"] = ph
-            else:
+        # 只有静态 DOM 里尚无选项的、可交互下拉才点开探测；所有下拉共享
+        # 一个整页预算，页面再复杂也不会把这一阶段拖到几十秒。
+        deadline = time.monotonic() + FORM_OPTION_PROBE_BUDGET_MS / 1000
+        for field in fields:
+            if (field["type"] != "select" or field.get("options")
+                    or field.get("_disabled")):
                 continue
-            fields.append({"label": label, "type": kind, **extra})
-        self._resolve_cascading_selects(fields)
+            remaining_ms = int((deadline - time.monotonic()) * 1000)
+            if remaining_ms <= 0:
+                break
+            item = items.nth(field["_index"])
+            field["options"] = self._peek_options(
+                item, min(FORM_OPTION_CLICK_TIMEOUT_MS, remaining_ms))
+
+        self._resolve_cascading_selects(fields, deadline=deadline)
+        for field in fields:
+            field.pop("_index", None)
+            field.pop("_disabled", None)
         return fields
 
     def scan_form_labels(self) -> List[str]:
@@ -158,7 +210,9 @@ class PageScanner:
                 return item
         return None
 
-    def _resolve_cascading_selects(self, fields: List[Dict[str, Any]]) -> None:
+    def _resolve_cascading_selects(
+            self, fields: List[Dict[str, Any]],
+            deadline: Optional[float] = None) -> None:
         """
         级联下拉（如"城市"依赖"国家"先选）第一遍扫描是空的——不是没选项，
         是控件在父级没选之前根本不可交互，_peek_options 点不开只能拿到 []。
@@ -175,6 +229,8 @@ class PageScanner:
         for i, f in enumerate(fields):
             if f["type"] != "select" or f.get("options"):
                 continue
+            if deadline is not None and time.monotonic() >= deadline:
+                break
             # 级联父级通常紧挨在子级前面（国家→城市→区域）。从最近的字段
             # 往前试，常见情况一次命中；原来从表单第一个下拉开始试，字段
             # 多时会先做许多无效选择和 500ms 等待。
@@ -186,29 +242,55 @@ class PageScanner:
                     continue
                 test_option = candidates[0]
                 try:
-                    self._select_option(parent["label"], test_option)
+                    remaining_ms = (int((deadline - time.monotonic()) * 1000)
+                                    if deadline is not None else 3000)
+                    if remaining_ms <= 0:
+                        return
+                    self._select_option(
+                        parent["label"], test_option,
+                        timeout_ms=min(FORM_OPTION_CLICK_TIMEOUT_MS, remaining_ms),
+                        item_index=parent.get("_index"))
                 except Exception:
                     continue
-                self.page.wait_for_timeout(500)   # 给级联接口留出返回时间
-                item = self._form_item_by_label(f["label"])
-                retry = self._peek_options(item) if item is not None else []
+                remaining_ms = (int((deadline - time.monotonic()) * 1000)
+                                if deadline is not None else 500)
+                if remaining_ms <= 0:
+                    return
+                self.page.wait_for_timeout(min(300, remaining_ms))
+                item = (self.page.locator(".el-form-item").nth(f["_index"])
+                        if f.get("_index") is not None
+                        else self._form_item_by_label(f["label"]))
+                remaining_ms = (int((deadline - time.monotonic()) * 1000)
+                                if deadline is not None else
+                                FORM_OPTION_CLICK_TIMEOUT_MS)
+                retry = (self._peek_options(
+                    item, min(FORM_OPTION_CLICK_TIMEOUT_MS, remaining_ms))
+                    if item is not None and remaining_ms > 0 else [])
                 if retry:
                     f["options"] = retry
                     f["depends_on"] = {"label": parent["label"], "option": test_option}
                     break
 
-    def _select_option(self, label: str, option: str) -> None:
+    def _select_option(
+            self, label: str, option: str,
+            timeout_ms: int = 3000,
+            item_index: Optional[int] = None) -> None:
         """扫描阶段专用的选择：点开 label 对应的下拉，选中指定文本的选项。"""
-        item = self._form_item_by_label(label)
+        item = (self.page.locator(".el-form-item").nth(item_index)
+                if item_index is not None else self._form_item_by_label(label))
         if item is None:
             raise LookupError(label)
-        item.locator(".el-select").first.click(timeout=3000)
-        self.page.wait_for_timeout(200)
+        timeout_ms = max(100, int(timeout_ms))
+        item.locator(".el-select").first.click(timeout=timeout_ms)
+        self.page.wait_for_timeout(min(100, timeout_ms))
         dd = self.page.locator(".el-select-dropdown:visible").last
-        dd.locator(".el-select-dropdown__item").filter(has_text=option).first.click(timeout=3000)
-        self.page.wait_for_timeout(200)
+        dd.locator(".el-select-dropdown__item").filter(
+            has_text=option).first.click(timeout=timeout_ms)
+        self.page.wait_for_timeout(min(100, timeout_ms))
 
-    def _peek_options(self, item) -> List[str]:
+    def _peek_options(
+            self, item,
+            timeout_ms: int = FORM_OPTION_CLICK_TIMEOUT_MS) -> List[str]:
         """
         点开一个下拉看看有什么选项。级联选择器（比如「城市」依赖「国家」先选）
         在没选父级之前是 disabled 的——Playwright 点一个 disabled 元素会一直
@@ -223,8 +305,7 @@ class PageScanner:
             # 起来；input 的 aria-controls/aria-owns 能直接定位它。直接读取可
             # 省掉每个下拉 300ms 展开 + 150ms 收起的固定等待。
             control = select.locator("input").first
-            if control.count() == 0:
-                return []
+            control.wait_for(state="attached", timeout=min(250, timeout_ms))
             cls = select.get_attribute("class") or ""
             disabled = control.get_attribute("disabled")
             aria_disabled = control.get_attribute("aria-disabled")
@@ -235,19 +316,21 @@ class PageScanner:
                           + (control.get_attribute("aria-owns") or "")).split()
             for popper_id in dict.fromkeys(popper_ids):
                 safe_id = popper_id.replace("\\", "\\\\").replace('"', '\\"')
-                opts = [o.strip() for o in self.page.locator(
+                opts = self.page.locator(
                     f'[id="{safe_id}"] .el-select-dropdown__item'
-                ).all_inner_texts() if o.strip()]
+                ).evaluate_all(
+                    "els => els.map(e => (e.textContent || '').trim()).filter(Boolean)")
                 if opts:
                     return opts[:15]
 
             # disabled 控件让 Playwright 重试到 timeout 才失败；级联页面里多个
             # disabled 下拉会各白等 3 秒。明确禁用就立即交给级联解析器处理。
-            select.click(timeout=1500)
-            self.page.wait_for_timeout(300)
+            select.click(timeout=timeout_ms)
+            self.page.wait_for_timeout(min(100, timeout_ms))
             dd = self.page.locator(".el-select-dropdown:visible").last
-            opts = [o.strip() for o in
-                    dd.locator(".el-select-dropdown__item").all_inner_texts()]
+            dd.wait_for(state="visible", timeout=timeout_ms)
+            opts = dd.locator(".el-select-dropdown__item").evaluate_all(
+                "els => els.map(e => (e.textContent || '').trim()).filter(Boolean)")
             self.page.keyboard.press("Escape")
             return opts[:15]
         except Exception:
