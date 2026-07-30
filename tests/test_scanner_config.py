@@ -58,6 +58,16 @@ class ToConfigPhase1Tests(unittest.TestCase):
         actions = [a for s in smoke["steps"] for a in s.keys()]
         self.assertIn("assert_no_render_garbage", actions)
 
+    def test_smoke_header_assertion_covers_all_scanned_columns(self):
+        cfg = scanner.to_config(self.report)
+        smoke = next(c for c in cfg["cases"] if c["name"] == "列表默认加载")
+        assertion = next(
+            step["assert_headers"] for step in smoke["steps"]
+            if "assert_headers" in step
+        )
+        self.assertEqual(self.report["table"]["headers"], assertion["contains"])
+        self.assertIn("状态", assertion["contains"])  # 第 6 列不能被截掉
+
     def test_page_name_is_not_clobbered_by_select_filter_case_name(self):
         # 真实事故：to_config() 内部生成"筛选-状态"这类下拉筛选用例时，曾经
         # 用了一个也叫 name 的局部变量，把传进来的页面名字形参覆盖掉——

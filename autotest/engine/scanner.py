@@ -968,7 +968,10 @@ def to_config(report: Dict[str, Any], name: Optional[str] = None,
              {"assert_no_console_error": None},
              {"assert_no_failed_request": None}]
     if headers:
-        smoke.insert(0, {"assert_headers": {"contains": headers[:5]}})
+        # 表头断言必须覆盖扫描到的完整表格。过去这里只取前 5 列，导致宽表
+        # 右侧的关键业务列（如手机号、金额、操作）完全没有进入生成配置，
+        # 页面即使漏列或错列也会被冒烟用例误判为正常。
+        smoke.insert(0, {"assert_headers": {"contains": headers}})
     cases.append({"name": "列表默认加载", "tags": ["smoke"], "steps": smoke})
 
     # 1b. 工具栏按钮可用性巡检（任何页面都值得测）
