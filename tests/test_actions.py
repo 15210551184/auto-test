@@ -16,6 +16,7 @@ if "playwright.sync_api" not in sys.modules:
     sys.modules["playwright.sync_api"] = sync_api
 
 from autotest.engine.actions import (AssertionFailed, AssertionWarning,
+                                     as_col_all,
                                      as_no_console, as_no_failed_req,
                                      as_no_i18n_leak, as_no_mixed_language,
                                      as_no_render_garbage, as_row_count,
@@ -99,6 +100,9 @@ class FakeSelectUI:
     def select(self, page, label, option=None, index=None):
         return option
 
+    def column_values(self, page, column):
+        return []
+
 
 class FakeConfig:
     list_api = None
@@ -123,6 +127,12 @@ class FakeSearchCtx:
     def label_of(self, label):
         return [label]
 
+    def column_of(self, column):
+        return column
+
+    def resolve(self, value):
+        return value
+
     def shot(self, tag):
         return f"screenshots/{tag}.png"
 
@@ -144,8 +154,8 @@ class CheckSelectOptionsTests(unittest.TestCase):
 
     def test_no_real_options_returns_skip_message(self):
         ctx = FakeSearchCtx(["全部"])
-        msg = do_check_select_options(ctx, label="状态")
-        self.assertIn("无可选项", msg)
+        with self.assertRaisesRegex(AssertionWarning, "无可选项"):
+            do_check_select_options(ctx, label="状态")
         self.assertNotIn("selected_状态", ctx.vars)
 
     def test_undisableable_cascading_select_skips_instead_of_erroring(self):
@@ -157,9 +167,37 @@ class CheckSelectOptionsTests(unittest.TestCase):
                 raise TimeoutError("locator.click: Timeout 5000ms exceeded")
         ctx = FakeSearchCtx([])
         ctx.ui = RaisingUI([])
-        msg = do_check_select_options(ctx, label="城市")
-        self.assertIn("打不开", msg)
+        with self.assertRaisesRegex(AssertionWarning, "未加载出选项"):
+            do_check_select_options(ctx, label="城市")
         self.assertNotIn("selected_城市", ctx.vars)
+
+    def test_each_option_is_checked_against_the_table_immediately(self):
+        class VerifyingUI(FakeSelectUI):
+            def __init__(self):
+                super().__init__(["中国", "韩国"])
+                self.selected = None
+
+            def select(self, page, label, option=None, index=None):
+                self.selected = option
+                return option
+
+            def column_values(self, page, column):
+                return ["中国"] if self.selected == "韩国" else ["中国"]
+
+        ctx = FakeSearchCtx([])
+        ctx.ui = VerifyingUI()
+        with self.assertRaisesRegex(AssertionFailed, "韩国.*不符"):
+            do_check_select_options(ctx, label="国家", column="国家")
+
+    def test_missing_selected_variable_skips_dependent_old_yaml_assertion(self):
+        ctx = FakeSearchCtx([])
+        ctx.ui.column_values = lambda page, column: ["中国"]
+        msg = as_col_all(
+            ctx,
+            column="国家",
+            equals="${selected_国家}",
+        )
+        self.assertIn("没有可用筛选值", msg)
 
 
 class FakeSignalCtx:

@@ -426,24 +426,38 @@ def as_no_mixed_language(ctx, expect: str = None, columns: list = None, **kw):
 
 
 @action("check_select_options")
-def do_check_select_options(ctx, label: str = None, max_options: int = 6, **kw):
+def do_check_select_options(ctx, label: str = None, column: str = None,
+                            max_options: int = 6, **kw):
     """
     遍历一个下拉筛选的前 N 个选项，逐个选中+搜索，确认每个选项都能正常筛选、
     不报错。比只测第一个选项更能抓到"某个状态码筛选后页面崩了"这类问题。
-    循环结束后 ${selected_label} 停在最后一个选项，供后续列断言复用。
+    每个选项搜索后立即校验对应表格列；循环结束后 ${selected_label} 停在
+    最后一个有数据的选项，兼容旧 YAML 后续的 assert_column_all。
     """
     page, ui = ctx.page, ctx.ui
     candidates = ctx.label_of(label)
+    selected_key = f"selected_{label}"
+    ctx.vars.pop(selected_key, None)
     try:
         raw_opts = ui.list_options(page, candidates)
-    except Exception:
+    except Exception as e:
         # 级联选择器（如「城市」依赖「国家」）在父级没选时点不开，属于正常情况
         # （扫描阶段已经因为取不到选项而不会生成这条用例；这里是手写配置时的兜底）
-        return f"下拉 '{label}' 打不开（可能依赖其他字段先选），跳过"
+        raise AssertionWarning(
+            f"下拉 '{label}' 未加载出选项（可能依赖其他字段或接口加载超时），"
+            f"跳过筛选校验：{type(e).__name__}")
     opts = [o for o in raw_opts if o and o not in ("全部", "请选择", "不限")][:max_options]
     if not opts:
-        return f"下拉 '{label}' 无可选项，跳过"
+        raise AssertionWarning(f"下拉 '{label}' 无可选项，跳过筛选校验")
     problems = []
+    empty_options = []
+    last_nonempty = None
+    check_column = column
+    if not check_column:
+        try:
+            check_column = ctx.column_of(label)
+        except Exception:
+            check_column = None
     for o in opts:
         base = len(ctx.console_errors)
         try:
@@ -451,19 +465,42 @@ def do_check_select_options(ctx, label: str = None, max_options: int = 6, **kw):
         except Exception as e:
             problems.append(f"选项 '{o}' 选择失败: {type(e).__name__}")
             continue
-        ctx.vars[f"selected_{label}"] = picked
+        ctx.vars[selected_key] = picked
         try:
             do_search(ctx)
         except Exception as e:
             problems.append(f"选项 '{o}' 搜索异常: {type(e).__name__}: {e}")
             continue
+        if check_column:
+            try:
+                vals = ui.column_values(page, ctx.column_of(check_column))
+                if not vals:
+                    empty_options.append(picked)
+                else:
+                    bad = [v for v in vals if not N.compare(v, picked)]
+                    if bad:
+                        problems.append(
+                            f"选项 '{picked}' 搜索后列 '{check_column}' "
+                            f"有 {len(bad)}/{len(vals)} 行不符: {bad[:3]}")
+                    else:
+                        last_nonempty = (o, picked)
+            except Exception as e:
+                problems.append(
+                    f"选项 '{picked}' 列值校验异常: {type(e).__name__}: {e}")
         errs = [e for e in ctx.console_errors[base:]
                 if "ResizeObserver" not in e and "favicon" not in e]
         if errs:
             problems.append(f"选项 '{o}' 触发报错: {errs[0][:100]}")
     if problems:
         _fail(f"下拉 '{label}' 有 {len(problems)} 个选项异常: {problems[:5]}")
-    return f"下拉 '{label}' 遍历 {len(opts)} 个选项均正常 ✓"
+    # 最后一个选项为空时，恢复到最近一个有数据的选项，让旧 YAML 紧随其后的
+    # assert_column_all 能进行真实校验，而不是靠“空表跳过”形成假通过。
+    if last_nonempty and ctx.vars.get(selected_key) != last_nonempty[1]:
+        picked = ui.select(page, candidates, option=last_nonempty[0])
+        ctx.vars[selected_key] = picked
+        do_search(ctx)
+    suffix = f"；其中 {len(empty_options)} 个选项返回 0 行" if empty_options else ""
+    return f"下拉 '{label}' 遍历 {len(opts)} 个选项均正常 ✓{suffix}"
 
 
 @action("capture")
@@ -519,6 +556,10 @@ def as_headers(ctx, contains: list = None, equals: list = None, value: list = No
 def as_col_all(ctx, column: str = None, equals: Any = None, contains: str = None,
                matches: str = None, kind: str = "auto", **kw):
     """搜索条件的核心断言：某列所有值都满足条件"""
+    selected_ref = (re.fullmatch(r"\$\{(selected_[^}]+)\}", equals)
+                    if isinstance(equals, str) else None)
+    if selected_ref and selected_ref.group(1) not in ctx.vars:
+        return "上一步没有可用筛选值，跳过依赖的列值校验"
     vals = ctx.ui.column_values(ctx.page, ctx.column_of(column))
     if not vals:
         return "列表为空，跳过列值校验"

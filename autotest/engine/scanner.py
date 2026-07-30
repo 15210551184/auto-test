@@ -835,11 +835,12 @@ def to_config(report: Dict[str, Any], name: Optional[str] = None,
             steps.append({"select": {"label": dep["label"], "option": dep["option"]}})
             steps.append({"wait": 500})
             case_name = f"筛选-{label}（联动{dep['label']}）"
-        steps.append({"check_select_options": {"label": label}})
+        # 动作内部逐个选项搜索后立即核对列值；不再只检查最后一个选项，更
+        # 不会因为最后一个选项返回空表而“跳过断言”形成假通过。
+        params = {"label": label}
         if col:
-            # 循环后 ${selected_label} 停在最后一个选项，据此校验列值
-            steps.append({"assert_column_all": {"column": col,
-                                                "equals": "${selected_%s}" % label}})
+            params["column"] = col
+        steps.append({"check_select_options": params})
         cases.append({"name": case_name, "tags": ["search"], "steps": steps})
 
     # 4. 日期范围

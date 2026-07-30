@@ -132,8 +132,12 @@ class ElementUIAdapter:
         """枚举下拉的所有选项，用于遍历筛选测试"""
         item = self._form_item(page, label)
         item.locator(".el-select, .el-input").first.click(timeout=5000)
-        page.wait_for_timeout(200)
         dropdown = page.locator(".el-select-dropdown:visible").last
+        # 选项经常由接口异步加载，固定等 200ms 会随机拿到空数组：同一用例
+        # 一次“无选项”、一次又有选项。先等浮层，再等第一个选项真正出现。
+        dropdown.wait_for(state="visible", timeout=5000)
+        dropdown.locator(".el-select-dropdown__item").first.wait_for(
+            state="visible", timeout=5000)
         opts = dropdown.locator(".el-select-dropdown__item").all_inner_texts()
         page.keyboard.press("Escape")
         return [o.strip() for o in opts]

@@ -80,7 +80,10 @@ class ToConfigPhase1Tests(unittest.TestCase):
         sel_case = next(c for c in cfg["cases"] if c["name"] == "筛选-状态")
         actions = [a for s in sel_case["steps"] for a in s.keys()]
         self.assertIn("check_select_options", actions)
-        self.assertIn("assert_column_all", actions)  # 状态 label 精确匹配到列
+        self.assertNotIn("assert_column_all", actions)
+        sweep = next(s["check_select_options"] for s in sel_case["steps"]
+                     if "check_select_options" in s)
+        self.assertEqual("状态", sweep["column"])  # 每个选项搜索后立即校验
 
     def test_no_unexecutable_todo_placeholders(self):
         # 第一期目标：生成的（未 skip 的）用例不含 TODO 占位
