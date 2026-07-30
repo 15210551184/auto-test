@@ -1,6 +1,7 @@
 import sys
 import types
 import unittest
+from unittest.mock import MagicMock
 
 
 # 纯逻辑单测：断言不需要真实浏览器，桩掉 playwright / yaml 即可导入。
@@ -20,6 +21,7 @@ from autotest.engine.actions import (AssertionFailed, AssertionWarning,
                                      as_no_console, as_no_failed_req,
                                      as_no_i18n_leak, as_no_mixed_language,
                                      as_no_render_garbage, as_row_count,
+                                     do_check_detail_tabs,
                                      do_check_select_options, do_search_select,
                                      do_switch_language)
 
@@ -170,6 +172,62 @@ class CheckSelectOptionsTests(unittest.TestCase):
 
         self.assertEqual("张三（负责人）", ctx.vars["selected_负责人"])
         self.assertIn("张三", msg)
+
+    def test_detail_tabs_skips_cleanly_when_list_is_empty(self):
+        ctx = MagicMock()
+        ctx.table_data.return_value = []
+
+        msg = do_check_detail_tabs(ctx)
+
+        self.assertIn("暂无数据", msg)
+        ctx.ui.row_action.assert_not_called()
+
+    def test_detail_tabs_walks_visible_tabs_and_tables(self):
+        ctx = MagicMock()
+        ctx.table_data.return_value = [{"司机姓名": "张三"}]
+        ctx.console_errors = []
+        ctx.failed_requests = []
+        page = ctx.page
+        page.url = "http://example.test/drivers"
+        ctx.ui.dialog_visible.return_value = False
+
+        root = MagicMock()
+        tabs = MagicMock()
+        tabs.evaluate_all.return_value = ["用户详情", "我的接单"]
+        panels = MagicMock()
+        panel = panels.last
+        panel.evaluate.return_value = {
+            "text_length": 20,
+            "has_table": True,
+            "headers": ["订单号", "状态"],
+            "rows": 2,
+            "empty": False,
+            "garbage": [],
+        }
+        search = MagicMock()
+        search.wait_for.side_effect = TimeoutError("no search")
+        panel.locator.return_value.first = search
+
+        def locate(selector):
+            if selector == "body":
+                return root
+            return MagicMock()
+
+        def root_locate(selector):
+            if "role='tab'" in selector and "tabpanel" not in selector:
+                return tabs
+            if "tabpanel" in selector:
+                return panels
+            return MagicMock()
+
+        page.locator.side_effect = locate
+        root.locator.side_effect = root_locate
+
+        msg = do_check_detail_tabs(ctx)
+
+        self.assertIn("2 个页签", msg)
+        self.assertIn("我的接单", msg)
+        self.assertEqual(2, panel.evaluate.call_count)
 
     def test_selected_var_is_set_for_downstream_assertion(self):
         # 回归用例：check_select_options 曾经漏掉 ctx.vars 赋值，导致生成的

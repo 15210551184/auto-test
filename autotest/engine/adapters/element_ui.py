@@ -408,16 +408,21 @@ class ElementUIAdapter:
         操作列可能直接放按钮，也可能收在「…」下拉里（行窄时常见），两种都试。
         """
         rows = self.rows(page, table)
-        if rows.count() <= row:
-            raise LookupError(f"表格只有 {rows.count()} 行，取不到第 {row + 1} 行")
         tr = rows.nth(row)
+        try:
+            tr.wait_for(state="attached", timeout=800)
+        except Exception as exc:
+            raise LookupError(f"表格取不到第 {row + 1} 行") from exc
 
         direct = tr.locator(
             f"button:has-text('{action}'), a:has-text('{action}'), "
             f"span:has-text('{action}'), .el-link:has-text('{action}')")
-        for i in range(direct.count()):
+        # 不先 count()：渲染线程繁忙时 count 没有动作级超时。按小上限
+        # 逐个尝试，越界会在 200ms 内结束。
+        for i in range(8):
             try:
                 el = direct.nth(i)
+                el.wait_for(state="attached", timeout=200)
                 if el.is_visible():
                     el.click(timeout=3000)
                     page.wait_for_timeout(600)
@@ -428,17 +433,17 @@ class ElementUIAdapter:
         # 收在「…」更多菜单里：点开后浮层挂在 body 下，不在行内
         more = tr.locator(".el-dropdown, .el-icon-more, button:has-text('…'), "
                           "button:has-text('...')").first
-        if more.count():
-            try:
-                more.click(timeout=3000)
-                page.wait_for_timeout(400)
-                menu = page.locator(".el-dropdown-menu:visible").last
-                menu.locator(f".el-dropdown-menu__item:has-text('{action}')") \
-                    .first.click(timeout=3000)
-                page.wait_for_timeout(600)
-                return
-            except Exception:
-                pass
+        try:
+            more.wait_for(state="visible", timeout=300)
+            more.click(timeout=3000)
+            page.wait_for_timeout(400)
+            menu = page.locator(".el-dropdown-menu:visible").last
+            menu.locator(f".el-dropdown-menu__item:has-text('{action}')") \
+                .first.click(timeout=3000)
+            page.wait_for_timeout(600)
+            return
+        except Exception:
+            pass
         raise LookupError(f"第 {row + 1} 行找不到「{action}」操作")
 
     def dialog_field_values(self, page: Page,

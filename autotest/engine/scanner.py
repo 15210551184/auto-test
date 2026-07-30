@@ -1098,6 +1098,11 @@ def to_config(report: Dict[str, Any], name: Optional[str] = None,
     # 1b. 工具栏按钮可用性巡检（任何页面都值得测）
     cases.append({"name": "按钮可用性巡检", "tags": ["health"],
                   "steps": [{"check_buttons": None}]})
+    # 行内“查看/详情”会进入菜单扫描发现不了的二级页面。运行时动态遍历
+    # 详情内部 Tab，覆盖“充值明细/我的接单/评价”等只读子列表与查询。
+    if btns.get("detail"):
+        cases.append({"name": "详情页与内部页签巡检", "tags": ["health"],
+                      "steps": [{"check_detail_tabs": None}]})
 
     # 2. 每个文本框生成一条搜索用例
     #    取表格里已有的值做搜索词，保证一定能搜出结果

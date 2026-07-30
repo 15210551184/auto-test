@@ -139,6 +139,12 @@ def _(p):
             "「删除/停用」这类有风险的按钮只确认存在、不会真的点下去")
 
 
+@_tpl("check_detail_tabs")
+def _(p):
+    return ("打开列表第一条记录的详情页，逐个切换内部页签，检查内容、表格、"
+            "空状态和查询按钮是否正常，全程不修改数据")
+
+
 @_tpl("check_select_options")
 def _(p):
     query = _p(p, "query")

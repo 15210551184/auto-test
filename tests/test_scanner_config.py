@@ -85,6 +85,15 @@ class ToConfigPhase1Tests(unittest.TestCase):
         cfg = scanner.to_config(self.report)
         self.assertIn("check_buttons", _all_actions(cfg))
 
+    def test_detail_button_generates_internal_tab_patrol(self):
+        self.report["buttons"]["detail"] = True
+        cfg = scanner.to_config(self.report)
+
+        case = next(c for c in cfg["cases"]
+                    if c["name"] == "详情页与内部页签巡检")
+        self.assertEqual(["health"], case["tags"])
+        self.assertEqual([{"check_detail_tabs": None}], case["steps"])
+
     def test_select_filter_uses_option_sweep(self):
         cfg = scanner.to_config(self.report)
         sel_case = next(c for c in cfg["cases"] if c["name"] == "筛选-状态")

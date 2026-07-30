@@ -300,6 +300,178 @@ def do_check_buttons(ctx, skip: list = None, max_buttons: int = 20, **kw):
     return f"巡检 {len(checked)} 个按钮均正常 ✓{tail}"
 
 
+@action("check_detail_tabs")
+def do_check_detail_tabs(ctx, row: int = 0, max_tabs: int = 15, **kw):
+    """
+    只读深度巡检：打开列表行的详情页/弹窗，遍历内部 Tab。每个 Tab 检查
+    内容、表格与空状态；有查询按钮时执行一次空条件查询，并监控前端报错
+    和失败请求。Tab 名称运行时动态读取，可覆盖权限差异和后续新增页签。
+    """
+    page, ui = ctx.page, ctx.ui
+    try:
+        rows = ctx.table_data()
+    except Exception as exc:
+        _fail(f"读取列表失败，无法进入详情: {type(exc).__name__}: {exc}")
+    if len(rows) <= row:
+        return "列表暂无数据，跳过详情内部页签巡检"
+
+    base_url = page.url
+    opened = False
+    tried = []
+    for text in _i18n_words("detail"):
+        if text in tried:
+            continue
+        tried.append(text)
+        try:
+            ui.row_action(page, row, text)
+            opened = True
+            break
+        except LookupError:
+            continue
+    if not opened:
+        _fail(f"第 {row + 1} 行找不到详情操作（尝试过 {tried}）")
+
+    page.wait_for_timeout(500)
+    in_dialog = ui.dialog_visible(page)
+    root = ui.dialog(page) if in_dialog else page.locator("body")
+    tab_selector = (
+        ".el-tabs__item:visible, .ant-tabs-tab:visible, "
+        "[role='tab']:visible"
+    )
+    panel_selector = (
+        ".el-tabs__content .el-tab-pane:visible, "
+        ".ant-tabs-content-holder .ant-tabs-tabpane-active, "
+        "[role='tabpanel']:visible"
+    )
+
+    try:
+        tab_labels = root.locator(tab_selector).evaluate_all(
+            """(els, limit) => {
+                const out = [];
+                for (const el of els) {
+                    const text = (el.textContent || '').trim();
+                    if (text && !out.includes(text)) out.push(text);
+                    if (out.length >= limit) break;
+                }
+                return out;
+            }""", max(1, int(max_tabs)))
+    except Exception:
+        tab_labels = []
+
+    def inspect_panel(
+            label: str, base_console: int,
+            base_failed: int) -> Dict[str, Any]:
+        panels = root.locator(panel_selector)
+        try:
+            panel = panels.last
+            panel.wait_for(state="visible", timeout=500)
+        except Exception:
+            panel = root
+
+        queried = False
+        search_sel = ", ".join(
+            f"button:has-text('{w}'), a:has-text('{w}')"
+            for w in _i18n_words("search"))
+        try:
+            search = panel.locator(search_sel).first
+            search.wait_for(state="visible", timeout=250)
+            search.click(timeout=1500)
+            page.wait_for_timeout(600)
+            queried = True
+        except Exception:
+            pass
+
+        try:
+            state = panel.evaluate(
+                """el => {
+                    const visible = node => {
+                        if (!node) return false;
+                        const s = getComputedStyle(node);
+                        const r = node.getBoundingClientRect();
+                        return s.display !== 'none' && s.visibility !== 'hidden'
+                            && r.width > 0 && r.height > 0;
+                    };
+                    const table = [...el.querySelectorAll(
+                        '.el-table, .ant-table, table')].find(visible);
+                    const headers = table ? [...table.querySelectorAll(
+                        '.el-table__header-wrapper th .cell, '
+                        + '.ant-table-thead th, thead th')]
+                        .map(x => (x.textContent || '').trim())
+                        .filter(Boolean) : [];
+                    const rows = table ? table.querySelectorAll(
+                        '.el-table__body-wrapper tr.el-table__row, '
+                        + '.ant-table-tbody tr, tbody tr').length : 0;
+                    const empty = !![...el.querySelectorAll(
+                        '.el-table__empty-block, .el-empty, .ant-empty')]
+                        .find(visible);
+                    const garbage = [...el.querySelectorAll('td, .cell')]
+                        .map(x => (x.textContent || '').trim().toLowerCase())
+                        .filter(x => ['undefined', 'null', 'nan',
+                            '[object object]', 'invalid date'].includes(x))
+                        .slice(0, 5);
+                    return {
+                        text_length: (el.innerText || '').trim().length,
+                        has_table: !!table, headers, rows, empty, garbage
+                    };
+                }"""
+            )
+        except Exception as exc:
+            _fail(f"详情页签「{label}」内容读取失败: {type(exc).__name__}")
+
+        new_errors = [
+            e for e in ctx.console_errors[base_console:]
+            if "ResizeObserver" not in e and "favicon" not in e
+        ]
+        new_failed = ctx.failed_requests[base_failed:]
+        if new_errors:
+            _fail(f"详情页签「{label}」触发前端报错: {new_errors[:2]}")
+        if new_failed:
+            _fail(f"详情页签「{label}」触发失败请求: {new_failed[:2]}")
+        if state.get("text_length", 0) < 2:
+            _fail(f"详情页签「{label}」内容为空白")
+        if state.get("has_table") and not state.get("headers"):
+            _fail(f"详情页签「{label}」表格没有表头")
+        if (state.get("has_table") and state.get("rows", 0) == 0
+                and not state.get("empty")):
+            _fail(f"详情页签「{label}」表格无数据，也没有显示空状态")
+        if state.get("garbage"):
+            _fail(f"详情页签「{label}」出现异常值: {state['garbage']}")
+        state["queried"] = queried
+        return state
+
+    summaries = []
+    labels_to_check = tab_labels or ["详情内容"]
+    for label in labels_to_check:
+        base_console = len(ctx.console_errors)
+        base_failed = len(ctx.failed_requests)
+        if tab_labels:
+            try:
+                tab = root.locator(tab_selector).filter(
+                    has_text=re.compile(rf"^\s*{re.escape(label)}\s*$")).first
+                tab.click(timeout=2000)
+                page.wait_for_timeout(500)
+            except Exception as exc:
+                _fail(f"详情页签「{label}」无法切换: {type(exc).__name__}")
+        state = inspect_panel(label, base_console, base_failed)
+        summary = label
+        if state.get("has_table"):
+            summary += f"（{len(state.get('headers', []))}列/{state.get('rows', 0)}行）"
+        if state.get("queried"):
+            summary += "，查询正常"
+        summaries.append(summary)
+
+    if in_dialog:
+        ui.close_dialog(page)
+    elif page.url != base_url:
+        try:
+            page.go_back(wait_until="domcontentloaded", timeout=15000)
+            page.wait_for_timeout(500)
+        except Exception:
+            pass
+
+    return f"详情深度巡检通过：{len(summaries)} 个页签；" + "；".join(summaries)
+
+
 # 明显的渲染异常标记：整格等于这些值，说明前端没拿到/没处理好数据
 _GARBAGE_EXACT = {"undefined", "null", "nan", "none", "[object object]",
                   "invalid date", "0000-00-00", "0000-00-00 00:00:00"}
