@@ -95,6 +95,39 @@ class ToConfigPhase1Tests(unittest.TestCase):
                      if "check_select_options" in s)
         self.assertEqual("状态", sweep["column"])  # 每个选项搜索后立即校验
 
+    def test_searchable_empty_select_uses_sample_value_for_remote_lookup(self):
+        self.report["form_fields"].append({
+            "label": "负责人", "type": "select", "options": [],
+            # 真实页面的旧版 Element UI 即使支持联想输入也可能保留
+            # readonly；此时必须能靠 placeholder 识别。
+            "searchable": False, "placeholder": "请输入负责人",
+        })
+        self.report["table"]["headers"].append("负责人")
+        self.report["table"]["sample_row"]["负责人"] = "张三"
+
+        cfg = scanner.to_config(self.report)
+        case = next(
+            c for c in cfg["cases"]
+            if c["name"] == "筛选-负责人（联想搜索）"
+        )
+        self.assertEqual(
+            {"search_select": {"label": "负责人", "query": "张三"}},
+            case["steps"][0],
+        )
+        self.assertEqual({"search": None}, case["steps"][1])
+        self.assertEqual(
+            {"assert_column_all": {"column": "负责人", "contains": "张三"}},
+            case["steps"][2],
+        )
+
+    def test_non_searchable_empty_select_still_does_not_generate_broken_case(self):
+        self.report["form_fields"].append({
+            "label": "城市", "type": "select", "options": [],
+            "searchable": False,
+        })
+        cfg = scanner.to_config(self.report)
+        self.assertNotIn("筛选-城市（联想搜索）", _all_names(cfg))
+
     def test_no_unexecutable_todo_placeholders(self):
         # 第一期目标：生成的（未 skip 的）用例不含 TODO 占位
         cfg = scanner.to_config(self.report)

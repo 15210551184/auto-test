@@ -128,6 +128,38 @@ class ElementUIAdapter:
         page.wait_for_timeout(200)
         return text
 
+    def search_select(self, page: Page, label: LabelLike, query: str) -> str:
+        """
+        操作 filterable/remote 下拉：输入查询词，等待异步联想项，再选择匹配项。
+
+        这类控件看起来像输入框，但只输入不选中时 v-model 通常仍是空值；
+        因此不能复用 fill()，必须真正点选一条联想结果。
+        """
+        item = self._form_item(page, label)
+        inp = item.locator(".el-select input.el-input__inner").first
+        inp.click(timeout=5000)
+        inp.fill("")
+        inp.type(str(query), delay=20)
+
+        dropdown = page.locator(".el-select-dropdown:visible").last
+        dropdown.wait_for(state="visible", timeout=5000)
+        options = dropdown.locator(
+            ".el-select-dropdown__item:not(.is-disabled)")
+        options.first.wait_for(state="visible", timeout=5000)
+
+        matched = options.filter(has_text=str(query))
+        try:
+            matched.first.wait_for(state="visible", timeout=1500)
+            target = matched.first
+        except Exception:
+            # 部分接口返回的是“名称（编码）”或只按关键字模糊匹配；没有
+            # 文案精确命中时仍选择第一条结果，后续列断言会验证是否筛对。
+            target = options.first
+        text = target.inner_text().strip()
+        target.click()
+        page.wait_for_timeout(200)
+        return text
+
     def list_options(self, page: Page, label: LabelLike) -> List[str]:
         """枚举下拉的所有选项，用于遍历筛选测试"""
         item = self._form_item(page, label)

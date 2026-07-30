@@ -100,6 +100,12 @@ def _(p):
     return f"在{_quote(label)}下拉框里选择第 {int(_p(p, 'index', 0)) + 1} 项"
 
 
+@_tpl("search_select")
+def _(p):
+    return (f"在{_quote(_p(p, 'label', '?'))}可搜索下拉框里输入"
+            f"{_quote(_p(p, 'query', ''))}，并选择匹配的联想项")
+
+
 @_tpl("date_range")
 def _(p):
     return f"在{_quote(_p(p, 'label', '?'))}选择日期范围：{_p(p, 'start', '?')} 至 {_p(p, 'end', '?')}"

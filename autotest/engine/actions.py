@@ -103,6 +103,14 @@ def do_select(ctx, label: str = None, option: str = None, index: int = None, **k
     return f"{label} 选中 '{picked}'"
 
 
+@action("search_select")
+def do_search_select(ctx, label: str = None, query: str = None, **kw):
+    q = str(ctx.resolve(query))
+    picked = ctx.ui.search_select(ctx.page, ctx.label_of(label), q)
+    ctx.vars[f"selected_{label}"] = picked
+    return f"{label} 输入 '{q}' 并选中 '{picked}'"
+
+
 @action("date_range")
 def do_date_range(ctx, label: str = None, start: str = None, end: str = None, **kw):
     ctx.ui.date_range(ctx.page, ctx.label_of(label), ctx.resolve(start), ctx.resolve(end))

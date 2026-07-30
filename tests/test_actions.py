@@ -20,7 +20,8 @@ from autotest.engine.actions import (AssertionFailed, AssertionWarning,
                                      as_no_console, as_no_failed_req,
                                      as_no_i18n_leak, as_no_mixed_language,
                                      as_no_render_garbage, as_row_count,
-                                     do_check_select_options, do_switch_language)
+                                     do_check_select_options, do_search_select,
+                                     do_switch_language)
 
 
 class FakeUI:
@@ -139,6 +140,16 @@ class FakeSearchCtx:
 
 
 class CheckSelectOptionsTests(unittest.TestCase):
+    def test_searchable_select_resolves_query_and_records_selected_value(self):
+        ctx = FakeSearchCtx([])
+        ctx.resolve = lambda value: "张三" if value == "${manager}" else value
+        ctx.ui.search_select = lambda page, label, query: f"{query}（负责人）"
+
+        msg = do_search_select(ctx, label="负责人", query="${manager}")
+
+        self.assertEqual("张三（负责人）", ctx.vars["selected_负责人"])
+        self.assertIn("张三", msg)
+
     def test_selected_var_is_set_for_downstream_assertion(self):
         # 回归用例：check_select_options 曾经漏掉 ctx.vars 赋值，导致生成的
         # 「筛选-X」用例里 ${selected_X} 永远解析不出来、断言必然失败——

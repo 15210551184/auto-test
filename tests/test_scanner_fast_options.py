@@ -62,8 +62,8 @@ class FastSelectOptionScanTest(unittest.TestCase):
             {"label": "国家名称", "type": "text",
              "placeholder": "请输入国家名称", "_index": 0},
             {"label": "状态", "type": "select",
-             "options": ["生效", "失效"], "_index": 1,
-             "_disabled": False},
+             "options": ["生效", "失效"], "placeholder": "请选择状态", "_index": 1,
+             "_disabled": False, "searchable": False},
         ]
         page.locator.return_value = items
         scanner = PageScanner.__new__(PageScanner)
@@ -76,7 +76,8 @@ class FastSelectOptionScanTest(unittest.TestCase):
             {"label": "国家名称", "type": "text",
              "placeholder": "请输入国家名称"},
             {"label": "状态", "type": "select",
-             "options": ["生效", "失效"]},
+             "options": ["生效", "失效"], "placeholder": "请选择状态",
+             "searchable": False},
         ], fields)
         self.assertEqual(1, items.evaluate_all.call_count)
         items.nth.assert_not_called()

@@ -120,6 +120,11 @@ class PageScanner:
                     }
                     if (select) {
                         const control = select.querySelector('input');
+                        const placeholder =
+                            control?.getAttribute('placeholder') || '';
+                        const disabled = select.classList.contains('is-disabled')
+                            || control?.disabled
+                            || control?.getAttribute('aria-disabled') === 'true';
                         const ids = [
                             control?.getAttribute('aria-controls'),
                             control?.getAttribute('aria-owns')
@@ -136,10 +141,18 @@ class PageScanner:
                         });
                         return {
                             label, type: 'select', options: options.slice(0, 15),
+                            placeholder,
                             _index: index,
-                            _disabled: select.classList.contains('is-disabled')
-                                || control?.disabled
-                                || control?.getAttribute('aria-disabled') === 'true'
+                            _disabled: disabled,
+                            // Element UI 的 filterable/remote 下拉会开放 input
+                            // 输入；但部分旧版/二次封装组件即使支持输入也始终
+                            // 保留 readonly，此时用“请输入/搜索”等 placeholder
+                            // 识别。普通下拉通常是“请选择”，不会误命中。
+                            searchable: !!control && !disabled && (
+                                !control.readOnly ||
+                                /(请输入|输入|搜索|search|enter|type)/i.test(
+                                    placeholder)
+                            )
                         };
                     }
                     if (input) {
@@ -1013,10 +1026,36 @@ def to_config(report: Dict[str, Any], name: Optional[str] = None,
         return chain
 
     for f in fields:
-        if f["type"] != "select" or not f.get("options"):
+        if f["type"] != "select":
             continue
         label = f["label"]
         col = _match_column(label, headers)
+        if not f.get("options"):
+            # filterable/remote 下拉（如加盟商、负责人、手机号）只有输入查询词
+            # 后才返回联想项，初始 options 为空不是“没有筛选项”。用表格首行
+            # 的真实值查询并选中联想项，既可执行，又能继续做列值断言。
+            seed = sample.get(col) if col else None
+            placeholder = str(f.get("placeholder") or "")
+            looks_searchable = bool(
+                f.get("searchable") or re.search(
+                    r"(请输入|输入|搜索|search|enter|type)",
+                    placeholder, re.I))
+            if looks_searchable and seed:
+                query = str(seed).strip()
+                if query and len(query) <= 40:
+                    steps = [
+                        {"search_select": {"label": label, "query": query}},
+                        {"search": None},
+                    ]
+                    if col:
+                        steps.append({"assert_column_all": {
+                            "column": col, "contains": query}})
+                    cases.append({
+                        "name": f"筛选-{label}（联想搜索）",
+                        "tags": ["search"],
+                        "steps": steps,
+                    })
+            continue
         steps = []
         deps = dependency_chain(f)
         # 这个用例名字用的局部变量绝不能叫 name——to_config() 自己的
