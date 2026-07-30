@@ -109,8 +109,10 @@ class CascadingSelectConfigTests(unittest.TestCase):
                 {"label": "国家", "type": "select", "options": ["全部", "中国", "韩国"]},
                 {"label": "城市", "type": "select", "options": ["北京市", "上海市"],
                  "depends_on": {"label": "国家", "option": "中国"}},
+                {"label": "服务类型", "type": "select", "options": ["舒适型"],
+                 "depends_on": {"label": "城市", "option": "北京市"}},
             ],
-            "table": {"headers": ["城市", "加盟商名称"], "row_count": 3,
+            "table": {"headers": ["城市", "服务类型", "加盟商名称"], "row_count": 3,
                       "column_types": {}, "sample_row": {}},
             "buttons": {"search": True, "reset": False, "export": False, "create": False},
             "pagination": {},
@@ -135,6 +137,18 @@ class CascadingSelectConfigTests(unittest.TestCase):
         case = next(c for c in cfg["cases"] if c["name"] == "筛选-国家")
         first_step = case["steps"][0]
         self.assertIn("check_select_options", first_step)
+
+    def test_multilevel_dependency_selects_from_root_to_direct_parent(self):
+        cfg = scanner.to_config(self.report)
+        case = next(c for c in cfg["cases"] if c["name"].startswith("筛选-服务类型"))
+        select_steps = [
+            step["select"] for step in case["steps"] if "select" in step
+        ]
+        self.assertEqual([
+            {"label": "国家", "option": "中国"},
+            {"label": "城市", "option": "北京市"},
+        ], select_steps)
+        self.assertIn("国家/城市", case["name"])
 
 
 class CrudConfigGenerationTests(unittest.TestCase):

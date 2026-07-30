@@ -452,12 +452,16 @@ def do_check_select_options(ctx, label: str = None, column: str = None,
     problems = []
     empty_options = []
     last_nonempty = None
-    check_column = column or label
-    try:
-        # Context.column_of() 返回多语言候选列名列表。这里转换一次后直接传给
-        # adapter；之前又调用了一遍 column_of(list)，会触发 unhashable list。
-        column_candidates = ctx.column_of(check_column)
-    except Exception:
+    missing_column = False
+    check_column = column
+    if check_column:
+        try:
+            # 只有扫描阶段可靠匹配到表头、显式传了 column 才校验列值。
+            # 「是否代叫」和表头「代叫」这种短词不能靠猜，否则会制造假失败。
+            column_candidates = ctx.column_of(check_column)
+        except Exception:
+            column_candidates = None
+    else:
         column_candidates = None
     for o in opts:
         base = len(ctx.console_errors)
@@ -478,13 +482,18 @@ def do_check_select_options(ctx, label: str = None, column: str = None,
                 if not vals:
                     empty_options.append(picked)
                 else:
-                    bad = [v for v in vals if not N.compare(v, picked)]
+                    bad = [v for v in vals if not _filter_value_matches(v, picked)]
                     if bad:
                         problems.append(
                             f"选项 '{picked}' 搜索后列 '{check_column}' "
                             f"有 {len(bad)}/{len(vals)} 行不符: {bad[:3]}")
                     else:
                         last_nonempty = (o, picked)
+            except LookupError:
+                # 兼容旧 YAML 曾经误配的列名（如筛选“是否代叫”，实际表头
+                # 只有“代叫”）：筛选动作仍然要测，但没有可靠映射就不猜列。
+                column_candidates = None
+                missing_column = True
             except Exception as e:
                 problems.append(
                     f"选项 '{picked}' 列值校验异常: {type(e).__name__}: {e}")
@@ -502,7 +511,23 @@ def do_check_select_options(ctx, label: str = None, column: str = None,
         do_search(ctx)
     suffix = (f"；暂无数据：{'、'.join(empty_options)}"
               if empty_options else "")
+    if missing_column:
+        suffix += "；未找到可靠对应列，仅验证筛选可执行"
     return f"下拉 '{label}' 遍历 {len(opts)} 个选项均正常 ✓{suffix}"
+
+
+def _filter_value_matches(table_value: Any, option_text: Any) -> bool:
+    """下拉文案与表格展示文案允许常见的短名称映射。"""
+    if N.compare(table_value, option_text):
+        return True
+
+    def normalized(value: Any) -> str:
+        text = N.text(value)
+        # 常见后台：下拉写“即时订单/预约订单”，表格为了节省列宽显示
+        # “即时单/预约单”。二者是同一个枚举，不该按字符串差异报错。
+        return re.sub(r"订单$", "单", text)
+
+    return normalized(table_value) == normalized(option_text)
 
 
 @action("capture")

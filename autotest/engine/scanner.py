@@ -815,26 +815,43 @@ def to_config(report: Dict[str, Any], name: Optional[str] = None,
         cases.append({"name": f"搜索-{label}", "tags": ["search"], "steps": steps})
 
     # 3. 下拉筛选：遍历每个选项逐一筛选，抓"某个选项筛选后报错"
+    fields_by_label = {f.get("label"): f for f in fields if f.get("label")}
+
+    def dependency_chain(field: Dict[str, Any]) -> List[Dict[str, str]]:
+        """递归补齐国家 -> 城市 -> 服务类型这类多级联动前置步骤。"""
+        chain: List[Dict[str, str]] = []
+        seen = set()
+        dep = field.get("depends_on")
+        while dep and dep.get("label") not in seen:
+            seen.add(dep["label"])
+            chain.append(dep)
+            parent = fields_by_label.get(dep["label"], {})
+            dep = parent.get("depends_on")
+        chain.reverse()
+        return chain
+
     for f in fields:
         if f["type"] != "select" or not f.get("options"):
             continue
         label = f["label"]
         col = _match_column(label, headers)
         steps = []
-        dep = f.get("depends_on")
+        deps = dependency_chain(f)
         # 这个用例名字用的局部变量绝不能叫 name——to_config() 自己的
         # 形参也叫 name（页面名字），for 循环不会开新作用域，同名局部变量
         # 会直接把形参覆盖掉，导致函数末尾 cfg["name"] 拿到的是"最后一个
         # 下拉筛选用例的名字"而不是页面名字（真实出现过的 bug：页面配置
         # 文件的 name: 字段变成了"筛选-状态"这种用例名）。
         case_name = f"筛选-{label}"
-        if dep:
+        if deps:
             # 级联下拉：这个字段没选父级就是 disabled 的，扫描时已经验证过
-            # "先选父级再选它"能测出选项——生成的用例把这一步补上，不然
-            # 执行时一样会点在一个不可交互的元素上。
-            steps.append({"select": {"label": dep["label"], "option": dep["option"]}})
-            steps.append({"wait": 500})
-            case_name = f"筛选-{label}（联动{dep['label']}）"
+            # "先选父级再选它"能测出选项。多级联动必须从最上游依次选择，
+            # 不能只选直接父级（城市本身可能还依赖国家）。
+            for dep in deps:
+                steps.append({"select": {
+                    "label": dep["label"], "option": dep["option"]}})
+                steps.append({"wait": 500})
+            case_name = f"筛选-{label}（联动{'/'.join(d['label'] for d in deps)}）"
         # 动作内部逐个选项搜索后立即核对列值；不再只检查最后一个选项，更
         # 不会因为最后一个选项返回空表而“跳过断言”形成假通过。
         params = {"label": label}

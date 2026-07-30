@@ -195,6 +195,52 @@ class CheckSelectOptionsTests(unittest.TestCase):
         msg = do_check_select_options(ctx, label="国家", column="国家")
         self.assertIn("暂无数据：中国、塞内加尔", msg)
 
+    def test_filter_option_and_short_table_alias_are_equivalent(self):
+        class AliasUI(FakeSelectUI):
+            def __init__(self):
+                super().__init__(["即时订单", "预约订单"])
+                self.selected = None
+
+            def select(self, page, label, option=None, index=None):
+                self.selected = option
+                return option
+
+            def column_values(self, page, column):
+                return ["即时单"] if self.selected == "即时订单" else ["预约单"]
+
+        ctx = FakeSearchCtx([])
+        ctx.ui = AliasUI()
+        msg = do_check_select_options(
+            ctx,
+            label="业务时效类型",
+            column="业务时效类型",
+        )
+        self.assertIn("均正常", msg)
+
+    def test_no_reliable_column_mapping_only_checks_filter_execution(self):
+        class NoColumnUI(FakeSelectUI):
+            def column_values(self, page, column):
+                raise AssertionError("没有显式 column 时不应尝试列值校验")
+
+        ctx = FakeSearchCtx(["是", "否"])
+        ctx.ui = NoColumnUI(["是", "否"])
+        msg = do_check_select_options(ctx, label="是否代叫")
+        self.assertIn("均正常", msg)
+
+    def test_stale_yaml_missing_column_falls_back_to_execution_check(self):
+        class MissingColumnUI(FakeSelectUI):
+            def column_values(self, page, column):
+                raise LookupError("表头没有列 是否代叫")
+
+        ctx = FakeSearchCtx(["是", "否"])
+        ctx.ui = MissingColumnUI(["是", "否"])
+        msg = do_check_select_options(
+            ctx,
+            label="是否代叫",
+            column="是否代叫",
+        )
+        self.assertIn("未找到可靠对应列", msg)
+
     def test_missing_selected_variable_skips_dependent_old_yaml_assertion(self):
         ctx = FakeSearchCtx([])
         ctx.ui.column_values = lambda page, column: ["中国"]
