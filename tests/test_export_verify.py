@@ -40,6 +40,7 @@ class FakeCtx:
         self.data = {}
         self.shot_calls = []
         self.preview_calls = []
+        self.api_log = []
 
     def shot(self, tag):
         self.shot_calls.append(tag)
@@ -163,6 +164,62 @@ class ExportDetailAttachmentTests(unittest.TestCase):
         message = str(cm.exception)
         self.assertIn("导出缺少页面上的列: ['加盟商']", message)
         self.assertIn("以下配置列未实际参与数据比对: ['加盟商']", message)
+
+    def test_auto_failure_reports_real_wait_and_export_api(self):
+        ctx = FakeCtx(self.tmp.name, ui_headers=["国家"], export_mode="auto")
+
+        def fail_after_export_request(current_ctx, timeout):
+            current_ctx.api_log.append({
+                "url": "http://example.test/api/export/country",
+                "status": 200,
+            })
+            return None
+
+        EV._download_direct = fail_after_export_request
+
+        with self.assertRaises(AssertionFailed) as cm:
+            EV.verify_export(ctx)
+
+        message = str(cm.exception)
+        self.assertIn("实际等待约", message)
+        self.assertNotIn("90000ms 内没拿到文件", message)
+        self.assertIn("/api/export/country", message)
+        self.assertIn("确认弹窗和文件响应", message)
+
+
+class ExportResponseDetectionTests(unittest.TestCase):
+    class FakeResponse:
+        def __init__(self, url, headers):
+            self.url = url
+            self.headers = headers
+
+    def test_content_disposition_utf8_filename(self):
+        response = self.FakeResponse(
+            "http://example.test/api/export",
+            {
+                "content-type": "application/octet-stream",
+                "content-disposition":
+                    "attachment; filename*=UTF-8''%E5%9B%BD%E5%AE%B6%E7%AE%A1%E7%90%86.xlsx",
+            },
+        )
+        self.assertEqual("国家管理.xlsx", EV._export_response_name(response))
+
+    def test_blob_response_without_filename_gets_spreadsheet_extension(self):
+        response = self.FakeResponse(
+            "http://example.test/api/export",
+            {
+                "content-type":
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            },
+        )
+        self.assertEqual("export.xlsx", EV._export_response_name(response))
+
+    def test_json_response_is_not_mistaken_for_export_file(self):
+        response = self.FakeResponse(
+            "http://example.test/api/export",
+            {"content-type": "application/json"},
+        )
+        self.assertIsNone(EV._export_response_name(response))
 
 
 if __name__ == "__main__":

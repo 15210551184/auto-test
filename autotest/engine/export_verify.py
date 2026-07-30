@@ -11,6 +11,7 @@ import re
 import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+from urllib.parse import unquote, urlparse
 
 from . import normalize as N
 
@@ -47,17 +48,125 @@ def _read_table(path: str) -> List[Dict[str, Any]]:
     return df.where(df.notna(), None).to_dict("records")
 
 
-def _download_direct(ctx, timeout: int) -> Optional[str]:
-    btn = ctx.selector("export_btn")
+def _export_response_name(resp) -> Optional[str]:
+    """从文件响应头/URL 推导安全文件名；不是文件响应就返回 None。"""
     try:
-        with ctx.page.expect_download(timeout=timeout) as dl:
-            ctx.page.locator(btn).first.click()
-        d = dl.value
-        dest = os.path.join(ctx.download_dir, d.suggested_filename)
-        d.save_as(dest)
+        headers = {str(k).lower(): str(v) for k, v in (resp.headers or {}).items()}
+        disposition = headers.get("content-disposition", "")
+        content_type = headers.get("content-type", "").lower()
+        url = resp.url
+    except Exception:
+        return None
+    match = re.search(r"filename\*\s*=\s*UTF-8''([^;]+)", disposition, re.I)
+    if not match:
+        match = re.search(r'filename\s*=\s*"?([^";]+)', disposition, re.I)
+    name = unquote(match.group(1).strip()) if match else ""
+    path_name = unquote(Path(urlparse(url).path).name)
+    if not name and re.search(r"\.(xlsx?|csv)(?:$|\?)", url, re.I):
+        name = path_name
+    looks_file = (
+        "attachment" in disposition.lower()
+        or any(token in content_type for token in (
+            "spreadsheet", "ms-excel", "text/csv", "octet-stream"))
+        or bool(re.search(r"\.(xlsx?|csv)$", name or path_name, re.I))
+    )
+    if not looks_file:
+        return None
+    name = os.path.basename(name or path_name or f"export_{int(time.time())}.xlsx")
+    if not Path(name).suffix:
+        name += ".csv" if "csv" in content_type else ".xlsx"
+    return name or f"export_{int(time.time())}.xlsx"
+
+
+def _save_finished_response(ctx, resp) -> Optional[str]:
+    name = _export_response_name(resp)
+    if not name:
+        return None
+    try:
+        body = resp.body()
+        if not body:
+            return None
+        dest = os.path.join(ctx.download_dir, name)
+        with open(dest, "wb") as f:
+            f.write(body)
         return dest
     except Exception:
         return None
+
+
+def _download_direct(ctx, timeout: int) -> Optional[str]:
+    """
+    同时兼容三种“直接导出”：
+    1. 浏览器原生 download 事件；
+    2. 点击后先弹确认框；
+    3. Axios/fetch 拿 Blob 后由前端保存（可能不触发 download，但接口响应
+       本身就是 Excel/CSV，可在 requestfinished 后直接保存）。
+    """
+    page = ctx.page
+    downloads, responses = [], []
+
+    def on_download(download):
+        downloads.append(download)
+
+    def on_finished(request):
+        try:
+            resp = request.response()
+            if resp and _export_response_name(resp):
+                responses.append(resp)
+        except Exception:
+            pass
+
+    page.on("download", on_download)
+    page.on("requestfinished", on_finished)
+    try:
+        buttons = page.locator(ctx.selector("export_btn"))
+        clicked = False
+        for i in range(8):
+            try:
+                button = buttons.nth(i)
+                button.wait_for(state="visible", timeout=250)
+                button.click(timeout=2000)
+                clicked = True
+                break
+            except Exception:
+                continue
+        if not clicked:
+            return None
+
+        # 有些系统点“导出”只是先弹确认框；此时必须确认后才会真正发请求。
+        page.wait_for_timeout(350)
+        confirm = page.locator(
+            ".el-message-box:visible .el-button--primary, "
+            ".el-dialog:visible button:has-text('确定'), "
+            ".el-dialog:visible button:has-text('导出')"
+        ).first
+        try:
+            confirm.wait_for(state="visible", timeout=350)
+            confirm.click(timeout=1200)
+        except Exception:
+            pass
+
+        deadline = time.monotonic() + max(500, timeout) / 1000
+        while time.monotonic() < deadline:
+            if downloads:
+                d = downloads[0]
+                dest = os.path.join(ctx.download_dir, d.suggested_filename)
+                d.save_as(dest)
+                return dest
+            while responses:
+                path = _save_finished_response(ctx, responses.pop(0))
+                if path:
+                    return path
+            page.wait_for_timeout(
+                min(250, max(1, int((deadline - time.monotonic()) * 1000))))
+        return None
+    finally:
+        for event, handler in (
+                ("download", on_download), ("requestfinished", on_finished)):
+            try:
+                page.remove_listener(event, handler)
+            except Exception:
+                pass
 
 
 def _download_async(ctx, timeout: int) -> Optional[str]:
@@ -65,7 +174,7 @@ def _download_async(ctx, timeout: int) -> Optional[str]:
     点导出 -> 后端建任务 -> 轮询任务列表 -> 拿到 url -> 用页面上下文请求下载。
     用 page.request 而不是 requests，是为了复用登录态 cookie。
     """
-    api = ctx.config.export_task_api
+    api = getattr(ctx.config, "export_task_api", None)
     if not api:
         return None
     ctx.page.locator(ctx.selector("export_btn")).first.click()
@@ -126,15 +235,33 @@ def verify_export(ctx, compare_with=None, columns=None, row_count_mode="total",
 
     mode = ctx.config.export_mode
     path = None
+    export_started = time.monotonic()
+    api_log_start = len(getattr(ctx, "api_log", None) or [])
     if mode in ("direct", "auto"):
-        path = _download_direct(ctx, timeout if mode == "direct" else 20000)
+        direct_timeout = timeout if mode == "direct" else min(timeout, 20000)
+        path = _download_direct(ctx, direct_timeout)
     if path is None and mode in ("async", "auto"):
-        path = _download_async(ctx, timeout)
+        task_api = getattr(ctx.config, "export_task_api", None)
+        if task_api:
+            path = _download_async(ctx, timeout)
 
     if path is None:
+        waited_ms = int((time.monotonic() - export_started) * 1000)
+        seen = []
+        api_calls = (getattr(ctx, "api_log", None) or [])[api_log_start:]
+        for call in api_calls[-8:]:
+            url = call.get("url") if isinstance(call, dict) else str(call)
+            if url:
+                seen.append(url)
+        hint = (
+            "已尝试浏览器下载事件、确认弹窗和文件响应。"
+            "若页面显示“导出任务已创建”，请配置 export_mode: async "
+            "和 export_task_api。"
+        )
+        if seen:
+            hint += f" 导出期间接口: {seen}"
         raise AssertionFailed(
-            f"导出失败：{timeout}ms 内没拿到文件。"
-            f"若是异步导出请在配置里设 export_mode: async 并填 export_task_api",
+            f"导出失败：实际等待约 {waited_ms}ms 仍没拿到文件。{hint}",
             detail={"images": evidence_images} if evidence_images else None,
         )
 
