@@ -6,20 +6,31 @@
 <title>自动化数据验证控制台</title>
 <style>
 :root{
-  --ink:#12161c; --ink-2:#5a6472; --ink-3:#8f99a8;
-  --line:#dde2e9; --bg:#eef1f5; --panel:#fff;
-  --pass:#0f9b6c; --fail:#d64550; --busy:#2f6fed;
-  --term-bg:#12161c; --term-fg:#c8d2df; --r:6px;
+  --ink:#152033; --ink-2:#5d6b82; --ink-3:#93a0b4;
+  --line:#dfe6f0; --line-soft:#edf1f7; --bg:#f3f6fb; --panel:#fff;
+  --pass:#07966d; --fail:#dc4454; --busy:#326bea; --busy-dark:#2456c5;
+  --busy-soft:#edf3ff; --warn:#d98718; --warn-soft:#fff7e8;
+  --term-bg:#111827; --term-fg:#cbd5e1; --r:12px;
+  --shadow:0 8px 28px rgba(35,55,90,.07);
 }
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--ink);
-  font:14px/1.55 -apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif}
+  font:14px/1.55 -apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif;
+  background-image:radial-gradient(circle at 8% 0,rgba(50,107,234,.07),transparent 25%),
+    linear-gradient(180deg,#f8faff 0,#f3f6fb 240px)}
 .term,code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
-header{background:var(--panel);border-bottom:1px solid var(--line);padding:0 20px;height:52px;
-  display:flex;align-items:center;gap:12px;position:sticky;top:0;z-index:20}
-header h1{font-size:15px;font-weight:600;margin:0}
-header .sep{color:var(--line)}
-#projSel{width:auto;min-width:190px;padding:6px 9px;font-size:13px}
+header{background:rgba(255,255,255,.92);border-bottom:1px solid rgba(216,225,238,.9);
+  padding:0 24px;height:64px;display:flex;align-items:center;gap:12px;position:sticky;top:0;
+  z-index:20;backdrop-filter:blur(14px);box-shadow:0 1px 10px rgba(42,64,102,.04)}
+.brand{display:flex;align-items:center;gap:10px;flex:0 0 auto}
+.brand-mark{width:34px;height:34px;border-radius:10px;display:grid;place-items:center;color:#fff;
+  font-size:16px;font-weight:800;background:linear-gradient(145deg,#4c7df0,#2456c5);
+  box-shadow:0 6px 16px rgba(50,107,234,.27)}
+.brand-copy{display:flex;flex-direction:column;line-height:1.15}
+header h1{font-size:15px;font-weight:700;margin:0;letter-spacing:.01em}
+.brand-copy small{font-size:9px;color:var(--ink-3);letter-spacing:.16em;margin-top:3px}
+header .sep{height:26px;width:1px;background:var(--line);font-size:0;margin:0 2px}
+#projSel{width:auto;min-width:210px;padding:7px 34px 7px 11px;font-size:13px;font-weight:600}
 #globalState{margin-left:auto;font-size:12px;padding:3px 10px;border-radius:20px;
   background:#eef1f5;color:var(--ink-2);display:flex;align-items:center;gap:6px}
 #globalState .dot{width:7px;height:7px;border-radius:50%;background:var(--ink-3)}
@@ -28,8 +39,8 @@ header .sep{color:var(--line)}
 #globalState.ok{background:#e6f6ef;color:var(--pass)} #globalState.ok .dot{background:var(--pass)}
 #globalState.bad{background:#fdeced;color:var(--fail)} #globalState.bad .dot{background:var(--fail)}
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:.25}}
-.wrap{max-width:1400px;margin:0 auto;padding:18px 20px 40px;
-  display:grid;grid-template-columns:1fr 400px;gap:18px;align-items:start}
+.wrap{max-width:1520px;margin:0 auto;padding:20px 24px 36px;
+  display:grid;grid-template-columns:minmax(0,1fr) 420px;gap:20px;align-items:start}
 /* grid/flex 子项默认 min-width:auto（按内容撑开），运行日志标签页多的时候
    （批量扫描几十个页面，每个页面一个标签）标签行的内容宽度会一路网上
    传导，把整个 .wrap 甚至 body 撑宽出现横向滚动条——每一层都得显式给
@@ -41,8 +52,8 @@ header .sep{color:var(--line)}
    菜单，来回滚动很烦。窄屏（<=1000px，含手机）维持原来的整页滚动，
    触屏上"锁高度+内部滚动"体验反而更别扭。 */
 @media(min-width:1001px){
-  .wrap{height:calc(100vh - 52px)}
-  .col-left,.col-right{display:flex;flex-direction:column;gap:16px;min-height:0;min-width:0;height:100%}
+  .wrap{height:calc(100vh - 64px)}
+  .col-left,.col-right{display:flex;flex-direction:column;gap:18px;min-height:0;min-width:0;height:100%}
   .col-left>.card,.col-right>.card{margin-bottom:0;min-height:0;min-width:0}
   .col-left>.card:not(.term-card){flex:1 1 58%;display:flex;flex-direction:column}
   .col-left>.card:not(.term-card) .tree{flex:1;max-height:none}
@@ -70,27 +81,38 @@ header .sep{color:var(--line)}
 .card.maximized.term-card .term{flex:1;height:auto;min-height:0}
 .card.maximized>.body{flex:1;overflow-y:auto;min-height:0}
 .card.maximized #repWrap{flex:1;overflow-y:auto;min-height:0}
-.card{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);margin-bottom:16px}
-.card>h2{margin:0;padding:11px 15px;font-size:12px;font-weight:600;letter-spacing:.09em;
-  text-transform:uppercase;color:var(--ink-3);border-bottom:1px solid var(--line);
+.card{background:rgba(255,255,255,.96);border:1px solid rgba(218,226,238,.9);
+  border-radius:var(--r);margin-bottom:16px;box-shadow:var(--shadow);overflow:hidden}
+.card>h2{margin:0;padding:13px 16px;font-size:13px;font-weight:700;letter-spacing:.02em;
+  text-transform:none;color:var(--ink-2);border-bottom:1px solid var(--line-soft);
   flex:0 0 auto;display:flex;align-items:center;gap:8px}
 .card>h2 .count{margin-left:auto;font-size:11px;letter-spacing:0;text-transform:none;
   color:var(--ink-3);font-weight:400}
 .card .body{padding:13px 15px}
 label{display:block;font-size:12px;color:var(--ink-2);margin:0 0 5px}
 select,input[type=text],input[type=password]{width:100%;padding:8px 10px;border:1px solid var(--line);
-  border-radius:5px;font-size:13px;background:#fff;color:var(--ink);font-family:inherit}
-select:focus,input:focus{outline:2px solid #b9cdf6;outline-offset:-1px;border-color:var(--busy)}
-textarea{width:100%;min-height:430px;padding:10px;border:1px solid var(--line);border-radius:5px;font:12px/1.55 ui-monospace,SFMono-Regular,Menlo,monospace;resize:vertical}
+  border-radius:8px;font-size:13px;background:#fff;color:var(--ink);font-family:inherit;
+  box-shadow:0 1px 2px rgba(36,55,85,.03);transition:border-color .15s,box-shadow .15s}
+select:focus,input:focus{outline:none;border-color:#8aabf5;box-shadow:0 0 0 3px rgba(50,107,234,.12)}
+textarea{width:100%;min-height:430px;padding:12px;border:1px solid var(--line);border-radius:9px;
+  background:#fbfcff;font:12px/1.6 ui-monospace,SFMono-Regular,Menlo,monospace;resize:vertical}
 .row{margin-bottom:12px}.row:last-child{margin-bottom:0}
 .two{display:grid;grid-template-columns:1fr 1fr;gap:10px}
-button{font:500 13px/1 inherit;padding:9px 14px;border-radius:5px;cursor:pointer;
-  border:1px solid var(--line);background:#fff;color:var(--ink);transition:background .12s}
-button:hover:not(:disabled){background:#f5f7fa;border-color:#c3cbd6}
+button{font:600 13px/1 inherit;padding:9px 14px;border-radius:8px;cursor:pointer;
+  border:1px solid var(--line);background:#fff;color:var(--ink-2);
+  transition:background .15s,border-color .15s,color .15s,transform .15s,box-shadow .15s}
+button:hover:not(:disabled){background:#f8faff;border-color:#bfcbe0;color:var(--ink);
+  transform:translateY(-1px);box-shadow:0 4px 10px rgba(40,61,96,.07)}
 button:focus-visible{outline:2px solid var(--busy);outline-offset:1px}
 button:disabled{opacity:.45;cursor:not-allowed}
-button.primary{background:var(--busy);border-color:var(--busy);color:#fff}
-button.primary:hover:not(:disabled){background:#2a63d6}
+button.primary{background:linear-gradient(135deg,#3e75ed,#2860dc);border-color:var(--busy);color:#fff;
+  box-shadow:0 5px 14px rgba(50,107,234,.22)}
+button.primary:hover:not(:disabled){background:linear-gradient(135deg,#356be0,#2456c5);
+  box-shadow:0 7px 18px rgba(50,107,234,.28)}
+button.soft-primary{background:var(--busy-soft);border-color:#cad9fa;color:var(--busy-dark)}
+button.soft-primary:hover:not(:disabled){background:#e2ebff;border-color:#aac1f4;color:var(--busy-dark)}
+button.caution{background:var(--warn-soft);border-color:#f2d59f;color:#a8660c}
+button.caution:hover:not(:disabled){background:#ffefd0;border-color:#e8bd6b;color:#8f5608}
 button.sm{padding:5px 10px;font-size:12px}
 button.link{border:none;background:none;color:var(--busy);padding:4px 6px}
 button.link:hover:not(:disabled){background:#eef3fd}
@@ -99,7 +121,7 @@ button.danger:hover:not(:disabled){background:#fdeced}
 .btns{display:flex;gap:8px;flex-wrap:wrap}
 .btns.fill button{flex:1;min-width:104px}
 .hint{font-size:12px;color:var(--ink-3);margin-top:9px;line-height:1.5}
-.tag-filter{border:1px solid var(--line);border-radius:5px;padding:9px 11px;background:#fafbfc}
+.tag-filter{border:1px solid var(--line);border-radius:9px;padding:10px 12px;background:#f9fbfe}
 .tf-title{font-size:12px;color:var(--ink-2);margin-bottom:7px;display:flex;
   align-items:center;gap:10px;flex-wrap:wrap}
 .tf-hint{color:var(--ink-3);font-weight:400}
@@ -111,7 +133,7 @@ button.danger:hover:not(:disabled){background:#fdeced}
 .step-h{font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;
   color:var(--ink-3);margin-bottom:7px}
 .step .hint{margin-bottom:0;margin-top:6px;font-size:11.5px}
-details.exec-opts{margin-top:10px;border:1px solid var(--line);border-radius:5px;background:#fafbfc}
+details.exec-opts{margin-top:10px;border:1px solid var(--line);border-radius:9px;background:#f9fbfe;overflow:hidden}
 details.exec-opts>summary{list-style:none;cursor:pointer;padding:9px 11px;font-size:12.5px;
   color:var(--ink-2);display:flex;align-items:center;gap:6px;user-select:none}
 details.exec-opts>summary::-webkit-details-marker{display:none}
@@ -123,8 +145,10 @@ details.exec-opts[open]>summary{border-bottom:1px solid var(--line)}
 .exec-opts-body .tag-filter{border:none;padding:0;background:none}
 .exec-opts-body .tag-filter+.tag-filter{margin-top:12px;padding-top:12px;border-top:1px solid var(--line)}
 /* 右侧操作区保持紧凑：三个主步骤仍全部可见，但减少重复留白和控件高度。 */
-.ops-card .body{padding:9px 12px}
-.ops-card .step+.step{margin-top:7px;padding-top:7px}
+.ops-card .body{padding:11px 12px 12px}
+.ops-card .step{position:relative;padding:11px 12px;border:1px solid var(--line-soft);
+  border-radius:10px;background:linear-gradient(180deg,#fff,#fbfcff)}
+.ops-card .step+.step{margin-top:9px;padding-top:11px;border-top:1px solid var(--line-soft)}
 .ops-card .step-h{margin-bottom:5px}
 .ops-card .row{margin-bottom:7px}
 .ops-card button:not(.icon-btn){padding:7px 10px}
@@ -133,33 +157,36 @@ details.exec-opts[open]>summary{border-bottom:1px solid var(--line)}
 .ops-card details.exec-opts>summary{padding:7px 9px}
 .ops-card .exec-opts-body{padding:8px 9px}
 .tree{max-height:490px;overflow-y:auto}
-.grp{width:100%;text-align:left;display:flex;align-items:center;gap:6px;
-  padding:8px 15px 8px;font:600 11px/1.55 inherit;letter-spacing:.06em;
-  color:var(--ink-3);background:#fafbfc;border-bottom:1px solid #f0f2f5;position:sticky;top:0;z-index:1}
-.grp:hover{background:#f2f5f9}.grp .chev{display:inline-block;width:14px;flex:0 0 14px;color:var(--ink-2)}
+.grp{width:100%;text-align:left;display:flex;align-items:center;gap:7px;
+  padding:9px 15px;font:700 11.5px/1.55 inherit;letter-spacing:.04em;
+  color:#718096;background:#f8faff;border-width:0 0 1px;border-radius:0;
+  border-color:var(--line-soft);position:sticky;top:0;z-index:1}
+.grp:hover{background:#f0f5ff;transform:none;box-shadow:none}.grp .chev{display:inline-block;width:14px;flex:0 0 14px;color:var(--ink-2)}
 /* 二级及以下分组：非全大写字重、带缩进和左侧引导线，和一级分组明显区分，
    避免「系统管理」和「系统管理／日志管理」看起来是并列的两个一级分组 */
 .grp.lvl1,.grp.lvl2{font:500 12.5px/1.4 inherit;letter-spacing:0;color:var(--ink-2);
   background:#fff;border-left:2px solid #dde2e9}
 .grp.lvl1:hover,.grp.lvl2:hover{background:#f8fafc}
 .grp .parent{color:var(--ink-3);font-weight:400}
-.item{display:flex;align-items:center;gap:10px;padding:9px 15px;
+.item{display:flex;align-items:center;gap:10px;padding:10px 15px;
   border-bottom:1px solid #f4f6f8;cursor:pointer}
-.item:hover{background:#f8fafc}
+.item:hover{background:#f7faff}
+.item:has(input:checked){background:linear-gradient(90deg,rgba(50,107,234,.09),rgba(50,107,234,.025));
+  box-shadow:inset 3px 0 var(--busy)}
 .item:last-child{border-bottom:none}
 .item input{width:15px;height:15px;flex:0 0 15px;accent-color:var(--busy);cursor:pointer}
 .item .nm{font-size:13.5px}
 .item.off .nm{color:var(--ink-3)}
 .item.lvl1,.item.lvl2{border-left:2px solid #eef1f5}
 .tags{margin-left:auto;display:flex;gap:5px;align-items:center;flex-wrap:wrap;justify-content:flex-end}
-.tag{font-size:11px;padding:2px 7px;border-radius:3px;background:#eef1f5;color:var(--ink-2);white-space:nowrap}
+.tag{font-size:10.5px;padding:2px 7px;border-radius:10px;background:#f0f3f8;color:var(--ink-2);white-space:nowrap}
 .tag.rec{background:#e6f6ef;color:var(--pass)}
 .tag.no{background:#f6f7f9;color:var(--ink-3)}
 .tag.cfg{background:#e8f0fe;color:var(--busy)}
 .selbar{display:flex;align-items:center;gap:10px;padding:9px 15px;flex:0 0 auto;
-  border-bottom:1px solid var(--line);background:#fafbfc;font-size:12.5px;color:var(--ink-2)}
+  border-bottom:1px solid var(--line-soft);background:#fbfcff;font-size:12.5px;color:var(--ink-2)}
 .selbar .right{margin-left:auto;display:flex;gap:4px}
-.term-card{background:var(--term-bg);border-color:#252c36}
+.term-card{background:var(--term-bg);border-color:#202b3d;box-shadow:0 12px 30px rgba(15,23,42,.15)}
 .term-card>h2{color:#7d8899;border-bottom-color:#252c36}
 .term-head{display:flex;align-items:center;gap:10px;width:100%}
 .term-head .job{color:#c8d2df;font-size:12px;letter-spacing:0;text-transform:none;font-weight:400}
@@ -205,9 +232,10 @@ details.exec-opts[open]>summary{border-bottom:1px solid var(--line)}
    或者手机窄屏时，「查看」按钮经常被挤到显示区域外面、直接被裁掉——
    改成整块竖排（时间+操作一行，下面依次是通过率、进度条、页面摘要），
    不管容器多窄都不会有横向内容被挤出去。 */
-.rep-item{padding:11px 15px;border-bottom:1px solid #f0f2f5}
+.rep-item{margin:9px 10px;padding:11px 12px;border:1px solid var(--line-soft);
+  border-radius:9px;background:#fff;transition:background .15s,border-color .15s,transform .15s}
 .rep-item:last-child{border-bottom:none}
-.rep-item:hover{background:#f8fafc}
+.rep-item:hover{background:#f8faff;border-color:#d4def0;transform:translateY(-1px)}
 .rep-row1{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:6px}
 .rep-name{font-size:12.5px;color:var(--ink);font-weight:500;overflow:hidden;
   text-overflow:ellipsis;white-space:nowrap;min-width:0;flex:1}
@@ -227,7 +255,8 @@ a.open:hover{text-decoration:underline}
 .mask{position:fixed;inset:0;background:rgba(18,22,28,.42);display:none;
   align-items:center;justify-content:center;z-index:40;padding:20px}
 .mask.show{display:flex}
-.modal{background:#fff;border-radius:8px;width:460px;max-width:100%;max-height:90vh;overflow:auto}
+.modal{background:#fff;border-radius:14px;width:460px;max-width:100%;max-height:90vh;overflow:auto;
+  box-shadow:0 24px 70px rgba(20,31,50,.26)}
 .modal h3{margin:0;padding:15px 18px;font-size:14px;border-bottom:1px solid var(--line)}
 .modal .body{padding:16px 18px}
 .modal .foot{padding:12px 18px;border-top:1px solid var(--line);display:flex;gap:8px;justify-content:flex-end}
@@ -244,18 +273,39 @@ a.open:hover{text-decoration:underline}
   opacity:0;transition:.25s;pointer-events:none;z-index:50;max-width:80vw}
 #toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
 #toast.bad{background:var(--fail)}
+header .logout{font-size:12px;color:var(--ink-3);text-decoration:none;padding:6px 8px;
+  border-radius:7px;white-space:nowrap}
+header .logout:hover{color:var(--fail);background:#fff1f2}
+@media(max-width:720px){
+  header{height:auto;min-height:64px;padding:10px 14px;gap:8px;flex-wrap:wrap}
+  .brand-copy small,.sep{display:none}
+  .brand-mark{width:31px;height:31px;border-radius:9px}
+  #projSel{order:3;width:100%;min-width:0}
+  #btnNewProj,#btnProjSettings{order:4;flex:1}
+  #globalState{margin-left:auto}
+  .wrap{padding:12px;gap:12px}
+  .two{grid-template-columns:1fr}
+  .selbar{align-items:flex-start;flex-direction:column}
+  .selbar .right{margin-left:0;width:100%;flex-wrap:wrap}
+  .ops-card .btns.fill button{min-width:calc(50% - 4px)}
+  .tags{display:none}
+  .card.maximized{top:12px;left:12px;right:12px;bottom:12px}
+}
 @media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
 </style>
 </head>
 <body>
 <header>
-  <h1>自动化数据验证</h1>
+  <div class="brand">
+    <span class="brand-mark">✓</span>
+    <span class="brand-copy"><h1>自动化数据验证</h1><small>TEST CONSOLE</small></span>
+  </div>
   <span class="sep">/</span>
   <select id="projSel"></select>
   <button class="sm" id="btnNewProj">新建系统</button>
   <button class="sm" id="btnProjSettings">项目设置</button>
   <span id="globalState"><span class="dot"></span><span id="stateText">空闲</span></span>
-  <a href="/logout" style="margin-left:8px;font-size:12px;color:var(--ink-3);text-decoration:none">退出登录</a>
+  <a href="/logout" class="logout">退出登录</a>
 </header>
 <div class="wrap">
   <div class="col-left">
@@ -304,7 +354,7 @@ a.open:hover{text-decoration:underline}
         <div class="step">
           <div class="step-h">1 · 扫描系统菜单</div>
           <div class="row btns fill">
-            <button id="btnDiscover">扫描系统菜单</button>
+            <button class="soft-primary" id="btnDiscover">扫描系统菜单</button>
           </div>
           <div class="hint" title="登录后展开左侧菜单，逐个访问并识别有没有表格、能不能导出。">识别页面结构（表格/导出），首次使用先点这个</div>
           <details class="exec-opts" id="scanLangFilter" style="display:none;margin-top:10px">
@@ -323,9 +373,9 @@ a.open:hover{text-decoration:underline}
         <div class="step">
           <div class="step-h">2 · 生成用例</div>
           <div class="row btns fill">
-            <button id="btnGen">生成用例</button>
+            <button class="soft-primary" id="btnGen">生成用例</button>
             <button id="btnRegen">重新生成 YAML</button>
-            <button id="btnRescan">重新扫描并生成</button>
+            <button class="caution" id="btnRescan">重新扫描并生成</button>
           </div>
           <div class="hint" title="重新生成 YAML 优先使用页面结构缓存；只有页面结构确实改变时才需要重新扫描。">重新生成走缓存；页面改版后再重新扫描</div>
         </div>

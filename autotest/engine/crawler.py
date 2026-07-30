@@ -52,6 +52,13 @@ SKIP_KEYWORDS = _i18n_words("logout") + [
     "个人中心", "修改密码", "帮助", "Profile", "Change Password", "Help",
 ]
 
+# 菜单探测只需要页面主体和表格结构，不需要等待地图、图片、轮询接口等所有
+# 资源完成。之前每页 page.goto(..., domcontentloaded, 30s)，目标站某些页面
+# 的脚本/资源一直不结束时，50 页几乎每页都吃满 30 秒，看起来像“卡死”。
+PROBE_NAV_TIMEOUT_MS = 15000
+PROBE_DOM_BUDGET_MS = 6000
+PROBE_ACTION_TIMEOUT_MS = 4000
+
 
 def _text(loc) -> str:
     try:
@@ -302,10 +309,9 @@ def crawl_menu(page: Page, home_url: str, max_pages: int = 60,
             direct_url = _route_url(home_url, leaf.get("menu_route"))
             if direct_url:
                 _progress(on_progress, f"  通过菜单路由访问：{direct_url}")
-                page.goto(direct_url, wait_until="domcontentloaded", timeout=30000)
-                page.wait_for_timeout(1200)
-                url = page.url
-                if is_login_page(page):
+                url, info, returned_to_login = _visit_and_probe(
+                    page, direct_url, on_progress)
+                if returned_to_login:
                     _progress(on_progress, "  跳过：会话已回到登录页")
                     continue
                 key = url.split("?")[0]
@@ -313,7 +319,6 @@ def crawl_menu(page: Page, home_url: str, max_pages: int = 60,
                     _progress(on_progress, "  跳过：与已发现页面 URL 重复")
                     continue
                 seen_url.add(key)
-                info = _probe_page(page)
                 out.append({"name": name, "group": leaf["group"], "url": url, **info})
                 _progress(on_progress, f"  完成：已保留 {len(out)} 个页面")
                 continue
@@ -368,11 +373,18 @@ def crawl_menu(page: Page, home_url: str, max_pages: int = 60,
                 continue
             seen_url.add(key)
 
-            info = _probe_page(page)
+            # 点击只负责确定真实路由；结构识别放到一个新的 Page 中，防止某个
+            # 菜单页面的死循环、弹窗或残留组件污染后续 40 多个页面。
+            _progress(on_progress, "  路由已确认，正在独立探测页面结构…")
+            probed_url, info, returned_to_login = _visit_and_probe(
+                page, url, on_progress)
+            if returned_to_login:
+                _progress(on_progress, "  跳过：独立探测时回到登录页")
+                continue
             out.append({
                 "name": name,
                 "group": leaf["group"],
-                "url": url,
+                "url": probed_url,
                 **info,
             })
             _progress(on_progress, f"  完成：已保留 {len(out)} 个页面")
@@ -383,16 +395,71 @@ def crawl_menu(page: Page, home_url: str, max_pages: int = 60,
     return out
 
 
-def _probe_page(page: Page) -> Dict:
+def _visit_and_probe(page: Page, target_url: str, on_progress=None):
+    """
+    用独立 Page 访问并识别一个菜单路由。
+
+    ``wait_until=commit`` 只等服务器开始返回页面；之后给 DOMContentLoaded
+    一个短预算，超时就使用当前已经渲染的 DOM，而不是为无关资源白等 30 秒。
+    独立 Page 无论成功失败都会关闭，单页异常不会累积到后续菜单。
+    """
+    probe_page = page.context.new_page()
+    probe_page.set_default_timeout(PROBE_ACTION_TIMEOUT_MS)
+    probe_page.set_default_navigation_timeout(PROBE_NAV_TIMEOUT_MS)
+    # cookie/localStorage 由 BrowserContext 共享，但 sessionStorage 是每个标签页
+    # 独立的。有些后台把 token 放在 sessionStorage；不复制的话新开的探测页
+    # 会被误判成未登录。
+    try:
+        session_items = page.evaluate(
+            "() => Object.fromEntries(Object.entries(sessionStorage))")
+        if session_items:
+            serialized = json.dumps(session_items, ensure_ascii=False)
+            probe_page.add_init_script(
+                f"for (const [k,v] of Object.entries({serialized})) "
+                "sessionStorage.setItem(k,v);")
+    except Exception:
+        pass
+    started = time.monotonic()
+    try:
+        probe_page.goto(target_url, wait_until="commit", timeout=PROBE_NAV_TIMEOUT_MS)
+        try:
+            probe_page.wait_for_load_state(
+                "domcontentloaded", timeout=PROBE_DOM_BUDGET_MS)
+        except Exception:
+            _progress(on_progress, "  页面资源仍在加载，使用当前已渲染内容继续识别")
+        probe_page.wait_for_timeout(600)
+        url = probe_page.url
+        elapsed = time.monotonic() - started
+        _progress(on_progress, f"  页面已打开（{elapsed:.1f}s），正在识别表格和操作能力…")
+        if is_login_page(probe_page):
+            return url, {}, True
+        return url, _probe_page(probe_page, on_progress), False
+    finally:
+        try:
+            probe_page.close(run_before_unload=False)
+        except Exception:
+            pass
+
+
+def _probe_page(page: Page, on_progress=None) -> Dict:
     """粗略判断这一页值不值得测"""
     table = None
+    _progress(on_progress, "    识别数据表格…")
     try:
         candidates = page.locator(".el-table, .ant-table, table.data-table, table")
-        for i in range(candidates.count()):
+        for i in range(min(candidates.count(), 8)):
             candidate = candidates.nth(i)
-            headers = candidate.locator(
-                ".el-table__header-wrapper th .cell, .ant-table-thead th, thead th").all_inner_texts()
-            if candidate.is_visible() and any(h.strip() for h in headers):
+            if not candidate.is_visible():
+                continue
+            header_locs = candidate.locator(
+                ".el-table__header-wrapper th .cell, .ant-table-thead th, thead th")
+            headers = []
+            for j in range(min(header_locs.count(), 50)):
+                try:
+                    headers.append(header_locs.nth(j).inner_text(timeout=1200))
+                except Exception:
+                    continue
+            if any(h.strip() for h in headers):
                 table = candidate
                 break
     except Exception:
@@ -412,15 +479,17 @@ def _probe_page(page: Page) -> Dict:
             pass
 
     def has_btn(*words):
-        for w in words:
-            try:
-                if page.locator(f"button:has-text('{w}'), a:has-text('{w}')").count() > 0:
-                    return True
-            except Exception:
-                pass
-        return False
+        selectors = []
+        for word in words:
+            safe = word.replace("\\", "\\\\").replace("'", "\\'")
+            selectors.extend((f"button:has-text('{safe}')", f"a:has-text('{safe}')"))
+        try:
+            return bool(selectors and page.locator(", ".join(selectors)).count())
+        except Exception:
+            return False
 
-    return {
+    _progress(on_progress, "    识别搜索、新增、导出等按钮…")
+    info = {
         "has_table": has_table,
         "columns": cols,
         "rows": rows,
@@ -433,6 +502,9 @@ def _probe_page(page: Page) -> Dict:
         # 有表格 + 有搜索 = 典型的数据列表页，最值得测
         "recommended": bool(has_table and cols >= 2),
     }
+    _progress(on_progress, f"    结构识别完成：{'有表格' if has_table else '无表格'}"
+              + (f"，{cols} 列" if has_table else ""))
+    return info
 
 
 def discover(home_url: str, login_cfg: Optional[dict] = None,
