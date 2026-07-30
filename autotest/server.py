@@ -413,15 +413,18 @@ def api_run():
     elif action == "test-login":
         cmd = [PY, "cli.py", "test-login", f"configs/{cfg}"]
         name = f"登录测试 {cfg}"
-    elif action in ("discover", "batch-scan", "batch-run"):
+    elif action in ("discover", "discover-incremental", "batch-scan", "batch-run"):
         d = body.get("project", "")
         if not d or "/" in d or "\\" in d:
             return jsonify({"ok": False, "msg": "项目参数不合法"}), 400
         if not P.load_project(d):
             return jsonify({"ok": False, "msg": "项目不存在"}), 404
-        verb = {"discover": "menu", "batch-scan": "batch-scan",
+        verb = {"discover": "menu", "discover-incremental": "menu",
+                "batch-scan": "batch-scan",
                 "batch-run": "batch-run"}[action]
         cmd = [PY, "cli.py", verb, d]
+        if action == "discover-incremental":
+            cmd.append("--incremental")
         if action == "batch-scan" and body.get("overwrite"):
             cmd.append("--overwrite")
         if action == "batch-scan" and body.get("force_scan"):
@@ -434,7 +437,9 @@ def api_run():
             cmd += ["--exclude-tags"] + body["exclude_tags"]
         if action == "batch-run" and body.get("lang"):
             cmd += ["--lang", body["lang"]]
-        name = {"discover": f"扫描菜单 {d}", "batch-scan": f"生成用例 {d}",
+        name = {"discover": f"扫描菜单 {d}",
+                "discover-incremental": f"增量扫描菜单 {d}",
+                "batch-scan": f"生成用例 {d}",
                 "batch-run": f"批量执行 {d}"}[action]
 
     elif action == "probe-lang":

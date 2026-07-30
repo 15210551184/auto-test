@@ -83,6 +83,7 @@ class PageScanner:
         self._api_bodies: Dict[str, str] = {}   # 只存"像列表接口"的候选，避免每个响应体都存
         self._ui = ElementUIAdapter()   # 只借用它关弹窗，不复用别的运行期逻辑
         page.on("response", self._on_resp)
+        page.on("requestfinished", self._on_request_finished)
 
     def _on_resp(self, resp):
         u = resp.url
@@ -90,11 +91,24 @@ class PageScanner:
             ct = (resp.headers or {}).get("content-type", "")
             if "json" in ct:
                 self.api_calls.append(u)
-                if re.search(r"(list|page|query|search|find)", u, re.I):
-                    try:
-                        self._api_bodies[u] = resp.text()[:8000]
-                    except Exception:
-                        pass
+
+    def _on_request_finished(self, request):
+        """
+        response 事件只代表响应头到达，直接 resp.text() 会等待正文结束；遇到
+        流式/异常接口时会把整个同步 Playwright 线程卡死。requestfinished
+        保证正文已经接收完成，再为列表候选保存小段样本用于接口匹配。
+        """
+        try:
+            resp = request.response()
+            if not resp:
+                return
+            u = resp.url
+            ct = (resp.headers or {}).get("content-type", "")
+            if (resp.status == 200 and "json" in ct
+                    and re.search(r"(list|page|query|search|find)", u, re.I)):
+                self._api_bodies[u] = resp.text()[:8000]
+        except Exception:
+            pass
 
     # ---------- 表单识别 ----------
     def scan_form(self) -> List[Dict[str, Any]]:
@@ -192,24 +206,20 @@ class PageScanner:
         只取 label 文案，不探测类型/选项——给多语言合并用，不产生"点开
         下拉""级联试选"这些副作用，也不会因为副作用打乱页面状态。
         """
-        labels = []
         items = self.page.locator(".el-form-item")
-        for i in range(items.count()):
-            item = items.nth(i)
-            try:
-                label = item.locator(".el-form-item__label").first.inner_text().strip()
-            except Exception:
-                continue
-            label = label.rstrip(":：").strip()
-            if not label:
-                continue
-            has_field = (item.locator(".el-date-editor").count() > 0
-                        or item.locator(".el-select").count() > 0
-                        or item.locator(".el-input__inner").count() > 0)
-            if not has_field:
-                continue
-            labels.append(label)
-        return labels
+        try:
+            return items.evaluate_all(
+                """items => items.map(item => {
+                    const label = (item.querySelector(
+                        '.el-form-item__label')?.textContent || '').trim()
+                        .replace(/[：:]\\s*$/, '').trim();
+                    const hasField = item.querySelector(
+                        '.el-date-editor, .el-select, .el-input__inner');
+                    return label && hasField ? label : null;
+                }).filter(Boolean)"""
+            )
+        except Exception:
+            return []
 
     def _form_item_by_label(self, label: str):
         items = self.page.locator(".el-form-item")
@@ -368,25 +378,23 @@ class PageScanner:
         """点开新增弹窗扫字段结构，扫完关掉。点不开就返回空，不影响其他扫描。"""
         btn = self._creation_trigger()
         try:
-            if btn.count() == 0:
-                return {}
-            btn.click(timeout=3000)
+            btn.wait_for(state="attached", timeout=700)
+            btn.click(timeout=1500)
         except Exception:
             return {}
 
         dialog = self.page.locator(
             ".el-dialog__wrapper:visible .el-dialog, .el-drawer:visible").last
         try:
-            dialog.wait_for(state="visible", timeout=5000)
+            dialog.wait_for(state="visible", timeout=2500)
         except Exception:
             return {}
-        self.page.wait_for_timeout(600)   # 等弹窗里的下拉/字典数据加载完
+        self.page.wait_for_timeout(300)   # 等弹窗里的下拉/字典数据加载完
 
         title = ""
         try:
             t = dialog.locator(".el-dialog__title, .el-drawer__title").first
-            if t.count():
-                title = t.inner_text().strip()
+            title = t.inner_text(timeout=500).strip()
         except Exception:
             pass
 
@@ -406,55 +414,91 @@ class PageScanner:
         """
         btn = self._creation_trigger()
         try:
-            if btn.count() == 0:
-                return []
-            btn.click(timeout=3000)
+            btn.wait_for(state="attached", timeout=700)
+            btn.click(timeout=1500)
         except Exception:
             return []
         dialog = self.page.locator(
             ".el-dialog__wrapper:visible .el-dialog, .el-drawer:visible").last
         try:
-            dialog.wait_for(state="visible", timeout=5000)
+            dialog.wait_for(state="visible", timeout=2500)
         except Exception:
             return []
-        self.page.wait_for_timeout(600)
-        labels = []
+        self.page.wait_for_timeout(300)
         try:
-            items = dialog.locator(".el-form-item")
-            for i in range(items.count()):
-                item = items.nth(i)
-                try:
-                    label = item.locator(".el-form-item__label").first.inner_text().strip()
-                except Exception:
-                    continue
-                label = label.rstrip(":：").strip().lstrip("*").strip()
-                if label:
-                    labels.append(label)
+            labels = dialog.locator(".el-form-item").evaluate_all(
+                """items => items.map(item => (
+                    item.querySelector('.el-form-item__label')?.textContent || ''
+                ).trim().replace(/[：:]\\s*$/, '').trim()
+                  .replace(/^\\*+/, '').trim()).filter(Boolean)"""
+            )
+        except Exception:
+            labels = []
         finally:
             self._ui.close_dialog(self.page)
         return labels
 
     def _scan_dialog_fields(self, dialog) -> List[Dict[str, Any]]:
-        out = []
         items = dialog.locator(".el-form-item")
-        for i in range(items.count()):
-            item = items.nth(i)
-            try:
-                label = item.locator(".el-form-item__label").first.inner_text().strip()
-            except Exception:
-                continue
-            # 必填项的 label 里可能带星号，去掉
-            label = label.rstrip(":：").strip().lstrip("*").strip()
-            if not label:
-                continue
-            try:
-                cls = item.get_attribute("class") or ""
-            except Exception:
-                cls = ""
-            field = {"label": label, "required": "is-required" in cls}
-            field.update(self._field_control(item))
-            out.append(field)
-        return out
+        try:
+            return items.evaluate_all(
+                """items => items.map(item => {
+                    const texts = (selector) => [...item.querySelectorAll(selector)]
+                        .map(e => (e.textContent || '').trim()).filter(Boolean)
+                        .slice(0, 15);
+                    const label = (
+                        item.querySelector('.el-form-item__label')?.textContent || ''
+                    ).trim().replace(/[：:]\\s*$/, '').trim()
+                     .replace(/^\\*+/, '').trim();
+                    if (!label) return null;
+                    const base = {label,
+                        required: item.classList.contains('is-required')};
+                    if (item.querySelector('.el-upload'))
+                        return {...base, type: 'upload', fillable: false};
+                    if (item.querySelector('.el-switch'))
+                        return {...base, type: 'switch'};
+                    if (item.querySelector('.el-radio-group, .el-radio'))
+                        return {...base, type: 'radio',
+                            options: texts('.el-radio')};
+                    if (item.querySelector('.el-checkbox-group'))
+                        return {...base, type: 'checkbox',
+                            options: texts('.el-checkbox')};
+                    if (item.querySelector('.el-date-editor'))
+                        return {...base, type: item.querySelector('.el-range-input')
+                            ? 'date_range' : 'date'};
+                    if (item.querySelector('.el-cascader'))
+                        return {...base, type: 'cascader', fillable: false};
+                    if (item.querySelector('.el-select')) {
+                        const control = item.querySelector('.el-select input');
+                        const ids = [
+                            control?.getAttribute('aria-controls'),
+                            control?.getAttribute('aria-owns')
+                        ].filter(Boolean).flatMap(v => v.split(/\\s+/));
+                        const options = [];
+                        [...new Set(ids)].forEach(id => document.getElementById(id)
+                            ?.querySelectorAll('.el-select-dropdown__item')
+                            .forEach(o => {
+                                const text = (o.textContent || '').trim();
+                                if (text && !options.includes(text)) options.push(text);
+                            }));
+                        return {...base, type: 'select',
+                            options: options.slice(0, 15)};
+                    }
+                    if (item.querySelector('.el-input-number'))
+                        return {...base, type: 'number'};
+                    const textarea = item.querySelector('textarea');
+                    if (textarea) return {...base, type: 'textarea',
+                        maxlength: Number(textarea.maxLength) > 0
+                            ? Number(textarea.maxLength) : null};
+                    const input = item.querySelector('input');
+                    if (input) return {...base, type: 'text',
+                        maxlength: Number(input.maxLength) > 0
+                            ? Number(input.maxLength) : null};
+                    return {...base, type: 'unknown', fillable: false};
+                }).filter(Boolean)"""
+            )
+        except Exception:
+            return []
 
     def _field_control(self, item) -> Dict[str, Any]:
         """判断控件类型，顺手读出长度上限/选项这些约束。"""
@@ -518,19 +562,56 @@ class PageScanner:
                 continue
         return None
 
+    def _table_snapshot(self) -> Dict[str, Any]:
+        """一次浏览器往返读取真实表格，避免 count()/all_inner_texts() 无界等待。"""
+        try:
+            snapshots = self.page.locator(
+                ".el-table, .ant-table, table.data-table, table"
+            ).evaluate_all(
+                """tables => {
+                    const visible = el => {
+                        if (!el) return false;
+                        const s = getComputedStyle(el), r = el.getBoundingClientRect();
+                        return s.display !== 'none' && s.visibility !== 'hidden'
+                            && r.width > 0 && r.height > 0;
+                    };
+                    for (const table of tables) {
+                        if (!visible(table)) continue;
+                        const head = table.querySelector(
+                            '.el-table__header-wrapper, .ant-table-thead, thead');
+                        let headerEls = head
+                            ? [...head.querySelectorAll('th .cell')] : [];
+                        if (!headerEls.length && head)
+                            headerEls = [...head.querySelectorAll('th')];
+                        const headers = headerEls.map(
+                            e => (e.textContent || '').trim()).filter(Boolean);
+                        if (!headers.length) continue;
+                        const body = table.querySelector(
+                            '.el-table__body-wrapper, .ant-table-tbody, tbody');
+                        const rows = body
+                            ? [...body.querySelectorAll('tr.el-table__row, tr')] : [];
+                        const cells = rows.length
+                            ? [...rows[0].querySelectorAll('td')].map(
+                                e => (e.textContent || '').trim().slice(0, 40))
+                            : [];
+                        return [{headers, row_count: rows.length, cells}];
+                    }
+                    return [];
+                }"""
+            )
+            return snapshots[0] if snapshots else {}
+        except Exception:
+            return {}
+
     def scan_table_headers(self) -> List[str]:
         """只取表头文案，用于多语言合并——跟 scan_table() 用同一套表格定位/
         表头容器逻辑，保证下标能和默认语言那次扫描的 headers 对齐。"""
-        tbl = self._locate_table()
-        if tbl is None:
-            return []
-        header_cells = tbl.locator(
-            ".el-table__header-wrapper, .ant-table-thead, thead").first.locator("th .cell, th")
-        return _unique([h.strip() for h in header_cells.all_inner_texts() if h.strip()])
+        return _unique(self._table_snapshot().get("headers", []))
 
     def scan_table(self) -> Dict[str, Any]:
-        tbl = self._locate_table()
-        if tbl is None:
+        snapshot = self._table_snapshot()
+        raw_headers = snapshot.get("headers") or []
+        if not raw_headers:
             return {}
 
         # 冻结列（左固定/右固定）会让 Element/Antd 把表头和表体各多渲染一份，
@@ -538,23 +619,17 @@ class PageScanner:
         # 之前不限定容器时，两份表头会先被 _unique() 去重掉，但单元格取值
         # 仍按原始（含重复）下标去对，导致取样值整体错位，殃及后面所有列：
         # 搜索用例的种子值、列类型猜测全部跟着错。
-        header_cells = tbl.locator(
-            ".el-table__header-wrapper, .ant-table-thead, thead").first.locator("th .cell, th")
-        rows = tbl.locator(
-            ".el-table__body-wrapper, .ant-table-tbody, tbody").first.locator("tr.el-table__row, tr")
-
-        headers = _unique([h.strip() for h in header_cells.all_inner_texts() if h.strip()])
-
-        sample = {}
-        if rows.count() > 0:
-            cells = rows.nth(0).locator("td")
-            n = min(len(headers), cells.count())
-            for j in range(n):
-                sample[headers[j]] = cells.nth(j).inner_text().strip()[:40]
+        headers = _unique(raw_headers)
+        cells = snapshot.get("cells") or []
+        sample = {
+            raw_headers[j]: cells[j]
+            for j in range(min(len(raw_headers), len(cells)))
+            if raw_headers[j] and raw_headers[j] not in raw_headers[:j]
+        }
 
         return {
             "headers": headers,
-            "row_count": rows.count(),
+            "row_count": snapshot.get("row_count", 0),
             "column_types": {h: self._guess_type(v) for h, v in sample.items()},
             "sample_row": sample,
         }
@@ -575,28 +650,43 @@ class PageScanner:
 
     # ---------- 按钮 / 分页 ----------
     def scan_buttons(self) -> Dict[str, bool]:
-        def has(*words):
-            return any(self.page.locator(
-                f"button:has-text('{w}'), a:has-text('{w}')").count() > 0 for w in words)
-        return {
-            "search": has(*_i18n_words("search")),
-            "reset": has(*_i18n_words("reset")),
-            "export": has(*_i18n_words("export")),
-            "create": has(*_i18n_words("create")),
-            "edit": has(*_i18n_words("edit")),
-            "delete": has(*_i18n_words("delete")),
-            "detail": has(*_i18n_words("detail")),
-            "status_toggle": has(*_i18n_words("disable", "enable")),
-            "batch": has(*_i18n_words("batch")),
+        terms = {
+            "search": _i18n_words("search"),
+            "reset": _i18n_words("reset"),
+            "export": _i18n_words("export"),
+            "create": _i18n_words("create"),
+            "edit": _i18n_words("edit"),
+            "delete": _i18n_words("delete"),
+            "detail": _i18n_words("detail"),
+            "status_toggle": _i18n_words("disable", "enable"),
+            "batch": _i18n_words("batch"),
         }
+        try:
+            return self.page.locator("button, a").evaluate_all(
+                """(els, terms) => {
+                    const texts = els.map(e => (e.textContent || '').trim());
+                    return Object.fromEntries(Object.entries(terms).map(
+                        ([key, words]) => [key, words.some(
+                            word => texts.some(text => text.includes(word))
+                        )]
+                    ));
+                }""", terms)
+        except Exception:
+            return {key: False for key in terms}
 
     def scan_pagination(self) -> Dict[str, Any]:
-        p = self.page.locator(".el-pagination")
-        if p.count() == 0:
+        try:
+            values = self.page.locator(".el-pagination").evaluate_all(
+                """els => els.slice(0, 1).map(el => ({
+                    total: (el.querySelector('.el-pagination__total')
+                        ?.textContent || '').trim()
+                }))"""
+            )
+        except Exception:
+            values = []
+        if not values:
             return {}
-        total_txt = ""
-        if p.locator(".el-pagination__total").count() > 0:
-            total_txt = p.locator(".el-pagination__total").first.inner_text()
+        total_txt = values[0].get("total", "")
         m = re.search(r"(\d+)", total_txt)
         return {"has_pagination": True, "total": int(m.group(1)) if m else None}
 
@@ -850,7 +940,8 @@ def scan(url: str, storage_state: Optional[str] = None,
          languages: Optional[Dict[str, Any]] = None,
          login: Optional[Dict[str, Any]] = None,
          include_crud: bool = True,
-         include_i18n: bool = True) -> Dict[str, Any]:
+         include_i18n: bool = True,
+         on_phase=None) -> Dict[str, Any]:
     """
     传了 login 就走懒登录（cookie 还有效就直接用，过期了才真正登录一次并
     把新 cookie 存回去）——不传就是纯用 storage_state 里的 cookie，cookie
@@ -862,7 +953,13 @@ def scan(url: str, storage_state: Optional[str] = None,
     """
     scan_started = time.monotonic()
     timings: Dict[str, int] = {}
+
+    def phase(name: str) -> None:
+        if on_phase:
+            on_phase(name)
+
     with sync_playwright() as pw:
+        phase("启动浏览器")
         phase_started = time.monotonic()
         browser = B.launch(pw, headless=headless)
         args = B.context_args()
@@ -872,23 +969,31 @@ def scan(url: str, storage_state: Optional[str] = None,
         bctx = browser.new_context(**args)
         page = bctx.new_page()
         sc = PageScanner(page)
+        phase("登录并加载页面")
         if login:
             did = ensure_logged_in(page, url, login)
             if did and storage_state:
                 save_storage_state(bctx, storage_state)
         else:
             page.goto(url, wait_until="domcontentloaded", timeout=60000)
+        # 登录沿用默认 30 秒容忍慢接口；进入结构扫描后所有交互统一收紧，
+        # 即使遗漏了某个动作级 timeout，也不会再单点白等半分钟。
+        page.set_default_timeout(5000)
+        phase("等待页面就绪")
         ready_ms = _wait_for_scan_ready(page, wait)
         timings["页面加载"] = int((time.monotonic() - phase_started) * 1000)
         timings["就绪等待"] = ready_ms
 
         phase_started = time.monotonic()
+        phase("识别表格")
         table = sc.scan_table()
         timings["表格"] = int((time.monotonic() - phase_started) * 1000)
         phase_started = time.monotonic()
+        phase("识别筛选项")
         form_fields = sc.scan_form()
         timings["筛选项"] = int((time.monotonic() - phase_started) * 1000)
         phase_started = time.monotonic()
+        phase("识别按钮、分页和接口")
         buttons = sc.scan_buttons()
         pagination = sc.scan_pagination()
         list_api = sc.guess_list_api(sample_row=table.get("sample_row"))
@@ -906,6 +1011,7 @@ def scan(url: str, storage_state: Optional[str] = None,
         # 放前面会影响表格/按钮的识别
         if include_crud and report["buttons"].get("create"):
             phase_started = time.monotonic()
+            phase("识别新增弹窗")
             report["create_form"] = sc.scan_form_schema()
             timings["CRUD表单"] = int((time.monotonic() - phase_started) * 1000)
         # 多语言合并放最后：要来回切换语言、重新扫表单/表头，对页面状态
@@ -913,6 +1019,7 @@ def scan(url: str, storage_state: Optional[str] = None,
         label_variants, header_variants = ({}, {})
         if include_i18n:
             phase_started = time.monotonic()
+            phase("识别多语言结构")
             label_variants, header_variants = sc.scan_language_variants(languages, report)
             timings["多语言"] = int((time.monotonic() - phase_started) * 1000)
         if label_variants:
@@ -921,6 +1028,7 @@ def scan(url: str, storage_state: Optional[str] = None,
             report["header_variants"] = header_variants
         timings["总计"] = int((time.monotonic() - scan_started) * 1000)
         report["scan_timings_ms"] = timings
+        phase("关闭浏览器")
         browser.close()
     return report
 

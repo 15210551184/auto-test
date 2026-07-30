@@ -47,6 +47,38 @@ class RemovePageTests(unittest.TestCase):
         self.assertEqual(1, project.remove_pages("测试系统", ["用户管理", "不存在"]))
         self.assertEqual(["角色管理"], [p["name"] for p in project.load_project("测试系统")["pages"]])
 
+    def test_incremental_merge_preserves_existing_and_adds_new_page(self):
+        data = project.load_project("测试系统")
+        data["pages"][0]["scan_timeout"] = 240
+        project.save_project(data)
+
+        result = project.merge_pages("测试系统", [
+            {"name": "用户管理", "group": "", "url": "/users",
+             "recommended": False},
+            {"name": "菜单管理", "group": "系统管理", "url": "/menus",
+             "recommended": True},
+        ])
+
+        self.assertEqual({"total": 3, "added": 1}, result)
+        pages = project.load_project("测试系统")["pages"]
+        user = next(p for p in pages if p["name"] == "用户管理")
+        menu = next(p for p in pages if p["name"] == "菜单管理")
+        self.assertTrue(user["selected"])
+        self.assertEqual(240, user["scan_timeout"])
+        self.assertTrue(menu["selected"])
+
+    def test_incremental_merge_deduplicates_same_url(self):
+        data = project.load_project("测试系统")
+        data["pages"][0]["url"] = "http://example.test/users?tab=1"
+        project.save_project(data)
+
+        result = project.merge_pages("测试系统", [
+            {"name": "用户列表新名称", "group": "系统管理",
+             "url": "http://example.test/users?tab=2", "recommended": True},
+        ])
+
+        self.assertEqual({"total": 2, "added": 0}, result)
+
 
 class SetScanLanguagesTests(unittest.TestCase):
     """

@@ -1,6 +1,8 @@
 import sys
+import threading
 import types
 import unittest
+from unittest.mock import patch
 
 if "playwright.sync_api" not in sys.modules:
     playwright = types.ModuleType("playwright")
@@ -13,7 +15,12 @@ if "playwright.sync_api" not in sys.modules:
     sys.modules["playwright"] = playwright
     sys.modules["playwright.sync_api"] = sync_api
 
-from autotest.engine.batch import LANG_SCAN_BUDGET_SEC, SCAN_TIMEOUT_SEC, _scan_timeout_for
+from autotest.engine.batch import (
+    LANG_SCAN_BUDGET_SEC,
+    SCAN_TIMEOUT_SEC,
+    _scan_timeout_for,
+    _scan_with_timeout,
+)
 
 
 class ScanTimeoutBudgetTests(unittest.TestCase):
@@ -56,6 +63,18 @@ class ScanTimeoutBudgetTests(unittest.TestCase):
     def test_custom_base_timeout_respected(self):
         languages = {"options": {"en": "English"}, "scan_languages": ["en"]}
         self.assertEqual(200 + LANG_SCAN_BUDGET_SEC, _scan_timeout_for(languages, base=200))
+
+    def test_timeout_reports_the_last_scan_phase(self):
+        release = threading.Event()
+
+        def stuck_scan(*args, on_phase=None, **kwargs):
+            on_phase("识别新增弹窗")
+            release.wait()
+
+        with patch("autotest.engine.batch.scanner.scan", side_effect=stuck_scan):
+            with self.assertRaisesRegex(TimeoutError, "识别新增弹窗"):
+                _scan_with_timeout("http://example.test", None, timeout=0.01)
+        release.set()
 
 
 if __name__ == "__main__":

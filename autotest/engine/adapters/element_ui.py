@@ -595,8 +595,8 @@ class ElementUIAdapter:
     def dialog_visible(self, page: Page) -> bool:
         for sel in (".el-dialog:visible", ".el-drawer:visible", ".el-message-box:visible"):
             try:
-                if page.locator(sel).count() > 0:
-                    return True
+                page.locator(sel).first.wait_for(state="attached", timeout=250)
+                return True
             except Exception:
                 continue
         return False
@@ -610,8 +610,9 @@ class ElementUIAdapter:
                     ".el-dialog:visible .el-button:has-text('关闭')"):
             try:
                 loc = page.locator(sel).first
-                if loc.count() > 0 and loc.is_visible():
-                    loc.click(timeout=2000)
+                loc.wait_for(state="visible", timeout=250)
+                if loc.is_visible():
+                    loc.click(timeout=800)
                     page.wait_for_timeout(300)
                     if not self.dialog_visible(page):
                         return

@@ -101,10 +101,12 @@ def _scan_with_timeout(url: str, storage_state: Optional[str], timeout: int = SC
 
     def worker():
         try:
+            box["phase"] = "准备扫描"
             box["report"] = scanner.scan(url, storage_state=storage_state, headless=True,
                                          languages=languages, login=login,
                                          include_crud=include_crud,
-                                         include_i18n=include_i18n)
+                                         include_i18n=include_i18n,
+                                         on_phase=lambda name: box.update(phase=name))
         except Exception as e:
             box["error"] = e
 
@@ -112,7 +114,10 @@ def _scan_with_timeout(url: str, storage_state: Optional[str], timeout: int = SC
     t.start()
     t.join(effective_timeout)
     if t.is_alive():
-        raise TimeoutError(f"扫描超过 {effective_timeout}s 未完成，页面可能卡死（地图/弹窗/死循环等），已跳过")
+        phase = box.get("phase", "未知阶段")
+        raise TimeoutError(
+            f"扫描超过 {effective_timeout}s 未完成，停在「{phase}」；"
+            "页面可能卡死，已跳过")
     if "error" in box:
         raise box["error"]
     return box["report"]

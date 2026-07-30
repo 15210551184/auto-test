@@ -279,8 +279,33 @@ def _menu_path(leaf) -> str:
         return ""
 
 
+def _incremental_leaves(
+        leaves: List[Dict], home_url: str,
+        existing_pages: List[Dict]) -> "tuple[List[Dict], int]":
+    """过滤已有菜单；路径或规范化 URL 任一相同都视为同一页面。"""
+    existing_paths = {
+        ((p.get("group") or "").strip(), (p.get("name") or "").strip())
+        for p in existing_pages
+    }
+    existing_urls = {
+        (p.get("url") or "").split("?")[0].rstrip("/")
+        for p in existing_pages if p.get("url")
+    }
+    fresh = []
+    for leaf in leaves:
+        path_key = ((leaf.get("group") or "").strip(),
+                    (leaf.get("name") or "").strip())
+        route = _route_url(home_url, leaf.get("menu_route"))
+        route_key = route.split("?")[0].rstrip("/") if route else ""
+        if path_key in existing_paths or (route_key and route_key in existing_urls):
+            continue
+        fresh.append(leaf)
+    return fresh, len(leaves) - len(fresh)
+
+
 def crawl_menu(page: Page, home_url: str, max_pages: int = 60,
-               probe: bool = True, on_progress=None) -> List[Dict]:
+               probe: bool = True, on_progress=None,
+               existing_pages: Optional[List[Dict]] = None) -> List[Dict]:
     """
     爬取菜单，返回页面列表。
 
@@ -293,7 +318,14 @@ def crawl_menu(page: Page, home_url: str, max_pages: int = 60,
     # 收集阶段总数未知，发一条不定量进度让界面有反馈
     progress.emit(phase="menu", page_name="正在展开菜单树…")
     leaves = _collect_all_leaves(page, on_progress)
-    _progress(on_progress, f"菜单收集完成，共 {len(leaves)} 个候选页面；开始逐页探测")
+    existing_pages = existing_pages or []
+    if existing_pages:
+        leaves, skipped = _incremental_leaves(
+            leaves, home_url, existing_pages)
+        _progress(on_progress, f"菜单收集完成；已有 {skipped} 个跳过，"
+                  f"发现 {len(leaves)} 个待探测的新菜单")
+    else:
+        _progress(on_progress, f"菜单收集完成，共 {len(leaves)} 个候选页面；开始逐页探测")
 
     if not probe:
         return [dict(l, url="", has_table=None) for l in leaves][:max_pages]
@@ -549,7 +581,8 @@ def _probe_page(page: Page, on_progress=None) -> Dict:
 def discover(home_url: str, login_cfg: Optional[dict] = None,
              storage_state: Optional[str] = None,
              max_pages: int = 60, probe: bool = True,
-             on_progress=None) -> List[Dict]:
+             on_progress=None,
+             existing_pages: Optional[List[Dict]] = None) -> List[Dict]:
     """对外入口：登录 → 爬菜单 → 返回页面列表"""
     with sync_playwright() as pw:
         browser = B.launch(pw, headless=True)
@@ -571,7 +604,8 @@ def discover(home_url: str, login_cfg: Optional[dict] = None,
         if on_progress:
             on_progress("正在逐分支展开菜单…")
         pages = crawl_menu(page, home_url, max_pages=max_pages, probe=probe,
-                           on_progress=on_progress)
+                           on_progress=on_progress,
+                           existing_pages=existing_pages)
 
         save_storage_state(bctx, storage_state, on_progress)
         browser.close()

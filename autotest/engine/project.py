@@ -130,6 +130,45 @@ def update_pages(dir_name: str, pages: List[Dict]) -> int:
     return len(pages)
 
 
+def merge_pages(dir_name: str, pages: List[Dict]) -> Dict[str, int]:
+    """
+    增量追加菜单扫描结果。已有页面原样保留（包括 selected、手工设置的
+    scan_timeout 等字段），只加入此前不存在的菜单，不删除任何旧页面。
+    """
+    data = load_project(dir_name)
+    if not data:
+        return {"total": 0, "added": 0}
+    current = data.get("pages", [])
+    paths = {
+        ((p.get("group") or "").strip(), (p.get("name") or "").strip())
+        for p in current
+    }
+    urls = {
+        (p.get("url") or "").split("?")[0].rstrip("/")
+        for p in current if p.get("url")
+    }
+    added = 0
+    for page in pages:
+        path_key = ((page.get("group") or "").strip(),
+                    (page.get("name") or "").strip())
+        url_key = (page.get("url") or "").split("?")[0].rstrip("/")
+        if path_key in paths or (url_key and url_key in urls):
+            continue
+        item = dict(page)
+        item["selected"] = item.get("selected", item.get("recommended", False))
+        item.pop("has_config", None)
+        current.append(item)
+        paths.add(path_key)
+        if url_key:
+            urls.add(url_key)
+        added += 1
+    for item in current:
+        item.pop("has_config", None)
+    data["pages"] = current
+    save_project(data)
+    return {"total": len(current), "added": added}
+
+
 def page_config_path(dir_name: str, page_name: str) -> Path:
     return PROJECTS_DIR / _safe(dir_name) / "pages" / f"{_safe(page_name)}.yaml"
 

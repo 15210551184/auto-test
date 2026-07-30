@@ -98,13 +98,23 @@ def cmd_menu(a):
     proj = P.load_project(a.project)
     if not proj:
         print(f"项目不存在: {a.project}"); sys.exit(1)
-    print(f"扫描菜单: {proj.get('home_url')}")
+    incremental = bool(getattr(a, "incremental", False))
+    print(f"{'增量扫描' if incremental else '扫描'}菜单: {proj.get('home_url')}")
     pages = discover(proj["home_url"], login_cfg=proj.get("login"),
                      storage_state=a.state, max_pages=a.max,
-                     on_progress=lambda m: print(f"  {m}", flush=True))
-    n = P.update_pages(a.project, pages)
+                     on_progress=lambda m: print(f"  {m}", flush=True),
+                     existing_pages=proj.get("pages") if incremental else None)
+    if incremental:
+        merged = P.merge_pages(a.project, pages)
+        n, added = merged["total"], merged["added"]
+    else:
+        n, added = P.update_pages(a.project, pages), len(pages)
     rec = sum(1 for p in pages if p.get("recommended"))
-    print(f"\n发现 {n} 个页面，其中 {rec} 个是数据列表页（已默认勾选）")
+    if incremental:
+        print(f"\n增量扫描完成：新增 {added} 个页面，当前共 {n} 个页面；"
+              f"新增页面中 {rec} 个是数据列表页")
+    else:
+        print(f"\n发现 {n} 个页面，其中 {rec} 个是数据列表页（已默认勾选）")
     for pg in pages:
         mark = "✓" if pg.get("recommended") else " "
         extra = []
@@ -260,6 +270,8 @@ def main():
     s6 = sub.add_parser("menu", help="爬取系统菜单")
     s6.add_argument("project")
     s6.add_argument("--max", type=int, default=60)
+    s6.add_argument("--incremental", action="store_true",
+                    help="只探测并追加新菜单，保留所有已有页面")
     s6.set_defaults(func=cmd_menu)
 
     s7 = sub.add_parser("batch-scan", help="给勾选页面批量生成配置")

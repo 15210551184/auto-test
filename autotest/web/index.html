@@ -355,8 +355,9 @@ header .logout:hover{color:var(--fail);background:#fff1f2}
           <div class="step-h">1 · 扫描系统菜单</div>
           <div class="row btns fill">
             <button class="soft-primary" id="btnDiscover">扫描系统菜单</button>
+            <button id="btnDiscoverIncremental">增量扫描菜单</button>
           </div>
-          <div class="hint" title="登录后展开左侧菜单，逐个访问并识别有没有表格、能不能导出。">识别页面结构（表格/导出），首次使用先点这个</div>
+          <div class="hint" title="全量扫描会重新探测所有页面；增量扫描只打开新菜单，已有页面和 YAML 不变。">首次使用全量扫描；以后用增量扫描检查新增菜单</div>
           <details class="exec-opts" id="scanLangFilter" style="display:none;margin-top:10px">
             <summary>扫描多语言健壮性<span id="scanLangBadge"></span></summary>
             <div class="exec-opts-body">
@@ -933,6 +934,7 @@ async function trigger(action, overwrite=false, forceScan=false){
   term.innerHTML='';everStreamed=true;hideProgress();resetLogs();setBusy(true);
 }
 $('#btnDiscover').onclick=()=>trigger('discover');
+$('#btnDiscoverIncremental').onclick=()=>trigger('discover-incremental');
 $('#btnGen').onclick=()=>trigger('batch-scan');
 $('#btnRegen').onclick=()=>{if(confirm('将使用页面结构缓存重新生成并覆盖当前已勾选页面的 YAML，确定继续吗？'))trigger('batch-scan',true);};
 $('#btnRescan').onclick=()=>{if(confirm('这会重新打开浏览器扫描页面并覆盖 YAML，页面结构确实改变了吗？'))trigger('batch-scan',true,true);};
@@ -941,7 +943,7 @@ $('#btnStop').onclick=async()=>{const r=await post('/api/stop');
   toast(r.data.ok?'已发送终止信号':'当前没有运行中的任务',!r.data.ok);};
 $('#btnClear').onclick=()=>{term.innerHTML='<span class="empty">日志已清空。</span>';everStreamed=false;hideProgress();resetLogs();};
 function setBusy(b){
-  ['#btnDiscover','#btnGen','#btnRegen','#btnRescan','#btnRunSel','#btnNewProj','#yamlProbeLang'].forEach(s=>$(s).disabled=b);
+  ['#btnDiscover','#btnDiscoverIncremental','#btnGen','#btnRegen','#btnRescan','#btnRunSel','#btnNewProj','#yamlProbeLang'].forEach(s=>$(s).disabled=b);
   $('#btnStop').disabled=!b;
   if(b) setState('busy','执行中');
 }
