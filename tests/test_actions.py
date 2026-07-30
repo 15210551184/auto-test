@@ -128,7 +128,8 @@ class FakeSearchCtx:
         return [label]
 
     def column_of(self, column):
-        return column
+        # 与真实 Context 一致：列名会扩展成多语言候选列表。
+        return [column]
 
     def resolve(self, value):
         return value
@@ -188,6 +189,11 @@ class CheckSelectOptionsTests(unittest.TestCase):
         ctx.ui = VerifyingUI()
         with self.assertRaisesRegex(AssertionFailed, "韩国.*不符"):
             do_check_select_options(ctx, label="国家", column="国家")
+
+    def test_empty_filter_result_is_reported_as_no_data_not_failure(self):
+        ctx = FakeSearchCtx(["中国", "塞内加尔"])
+        msg = do_check_select_options(ctx, label="国家", column="国家")
+        self.assertIn("暂无数据：中国、塞内加尔", msg)
 
     def test_missing_selected_variable_skips_dependent_old_yaml_assertion(self):
         ctx = FakeSearchCtx([])

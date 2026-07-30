@@ -452,12 +452,13 @@ def do_check_select_options(ctx, label: str = None, column: str = None,
     problems = []
     empty_options = []
     last_nonempty = None
-    check_column = column
-    if not check_column:
-        try:
-            check_column = ctx.column_of(label)
-        except Exception:
-            check_column = None
+    check_column = column or label
+    try:
+        # Context.column_of() 返回多语言候选列名列表。这里转换一次后直接传给
+        # adapter；之前又调用了一遍 column_of(list)，会触发 unhashable list。
+        column_candidates = ctx.column_of(check_column)
+    except Exception:
+        column_candidates = None
     for o in opts:
         base = len(ctx.console_errors)
         try:
@@ -471,9 +472,9 @@ def do_check_select_options(ctx, label: str = None, column: str = None,
         except Exception as e:
             problems.append(f"选项 '{o}' 搜索异常: {type(e).__name__}: {e}")
             continue
-        if check_column:
+        if column_candidates:
             try:
-                vals = ui.column_values(page, ctx.column_of(check_column))
+                vals = ui.column_values(page, column_candidates)
                 if not vals:
                     empty_options.append(picked)
                 else:
@@ -499,7 +500,8 @@ def do_check_select_options(ctx, label: str = None, column: str = None,
         picked = ui.select(page, candidates, option=last_nonempty[0])
         ctx.vars[selected_key] = picked
         do_search(ctx)
-    suffix = f"；其中 {len(empty_options)} 个选项返回 0 行" if empty_options else ""
+    suffix = (f"；暂无数据：{'、'.join(empty_options)}"
+              if empty_options else "")
     return f"下拉 '{label}' 遍历 {len(opts)} 个选项均正常 ✓{suffix}"
 
 

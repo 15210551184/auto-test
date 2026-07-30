@@ -19,5 +19,20 @@ class RightColumnLayoutTests(unittest.TestCase):
         self.assertIn("min-height:220px", INDEX_HTML)
 
 
+class DefaultExecutionTagsTests(unittest.TestCase):
+    def test_safe_read_only_categories_are_checked_by_default(self):
+        for tag in ("smoke", "health", "search", "list", "export"):
+            self.assertIn(
+                f'data-tagf value="{tag}" checked',
+                INDEX_HTML,
+            )
+
+    def test_mutating_and_language_categories_are_opt_in(self):
+        self.assertIn('data-tagf value="crud">', INDEX_HTML)
+        self.assertIn('data-tagf value="i18n">', INDEX_HTML)
+        self.assertNotIn('data-tagf value="crud" checked', INDEX_HTML)
+        self.assertNotIn('data-tagf value="i18n" checked', INDEX_HTML)
+
+
 if __name__ == "__main__":
     unittest.main()
