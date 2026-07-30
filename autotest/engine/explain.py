@@ -141,7 +141,10 @@ def _(p):
 
 @_tpl("check_select_options")
 def _(p):
-    return f"把{_quote(_p(p, 'label', '?'))}下拉框的每个选项都选一遍并搜索，确认每个选项筛选后都不报错"
+    query = _p(p, "query")
+    prefix = f"先输入{_quote(query)}加载联想项，再" if query else ""
+    return (f"{prefix}把{_quote(_p(p, 'label', '?'))}下拉框的每个选项"
+            "都选一遍并搜索，确认每个选项筛选后都不报错")
 
 
 @_tpl("capture")

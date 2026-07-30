@@ -140,6 +140,27 @@ class FakeSearchCtx:
 
 
 class CheckSelectOptionsTests(unittest.TestCase):
+    def test_runtime_query_is_used_to_load_remote_options(self):
+        class RemoteUI(FakeSelectUI):
+            def __init__(self):
+                super().__init__([])
+                self.query = None
+
+            def search_select(self, page, label, query):
+                self.query = query
+                return "张三"
+
+            def column_values(self, page, column):
+                return ["张三"]
+
+        ctx = FakeSearchCtx([])
+        ctx.ui = RemoteUI()
+        do_check_select_options(
+            ctx, label="负责人", column="负责人", query="张三")
+
+        self.assertEqual("张三", ctx.ui.query)
+        self.assertEqual("张三", ctx.vars["selected_负责人"])
+
     def test_searchable_select_resolves_query_and_records_selected_value(self):
         ctx = FakeSearchCtx([])
         ctx.resolve = lambda value: "张三" if value == "${manager}" else value

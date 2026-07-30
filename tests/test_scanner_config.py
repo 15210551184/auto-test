@@ -95,11 +95,9 @@ class ToConfigPhase1Tests(unittest.TestCase):
                      if "check_select_options" in s)
         self.assertEqual("状态", sweep["column"])  # 每个选项搜索后立即校验
 
-    def test_searchable_empty_select_uses_sample_value_for_remote_lookup(self):
+    def test_empty_select_is_generated_and_resolved_at_runtime(self):
         self.report["form_fields"].append({
             "label": "负责人", "type": "select", "options": [],
-            # 真实页面的旧版 Element UI 即使支持联想输入也可能保留
-            # readonly；此时必须能靠 placeholder 识别。
             "searchable": False, "placeholder": "请输入负责人",
         })
         self.report["table"]["headers"].append("负责人")
@@ -108,25 +106,29 @@ class ToConfigPhase1Tests(unittest.TestCase):
         cfg = scanner.to_config(self.report)
         case = next(
             c for c in cfg["cases"]
-            if c["name"] == "筛选-负责人（联想搜索）"
+            if c["name"] == "筛选-负责人（运行时取选项）"
         )
         self.assertEqual(
-            {"search_select": {"label": "负责人", "query": "张三"}},
+            {"check_select_options": {
+                "label": "负责人", "column": "负责人", "query": "张三"}},
             case["steps"][0],
         )
-        self.assertEqual({"search": None}, case["steps"][1])
-        self.assertEqual(
-            {"assert_column_all": {"column": "负责人", "contains": "张三"}},
-            case["steps"][2],
-        )
 
-    def test_non_searchable_empty_select_still_does_not_generate_broken_case(self):
+    def test_empty_select_without_sample_still_generates_runtime_case(self):
         self.report["form_fields"].append({
             "label": "城市", "type": "select", "options": [],
             "searchable": False,
         })
         cfg = scanner.to_config(self.report)
-        self.assertNotIn("筛选-城市（联想搜索）", _all_names(cfg))
+        self.assertIn("筛选-城市（运行时取选项）", _all_names(cfg))
+        case = next(
+            c for c in cfg["cases"]
+            if c["name"] == "筛选-城市（运行时取选项）"
+        )
+        self.assertEqual(
+            {"check_select_options": {"label": "城市"}},
+            case["steps"][0],
+        )
 
     def test_no_unexecutable_todo_placeholders(self):
         # 第一期目标：生成的（未 skip 的）用例不含 TODO 占位

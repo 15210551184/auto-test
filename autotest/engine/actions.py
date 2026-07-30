@@ -435,7 +435,7 @@ def as_no_mixed_language(ctx, expect: str = None, columns: list = None, **kw):
 
 @action("check_select_options")
 def do_check_select_options(ctx, label: str = None, column: str = None,
-                            max_options: int = 6, **kw):
+                            max_options: int = 6, query: str = None, **kw):
     """
     遍历一个下拉筛选的前 N 个选项，逐个选中+搜索，确认每个选项都能正常筛选、
     不报错。比只测第一个选项更能抓到"某个状态码筛选后页面崩了"这类问题。
@@ -446,6 +446,35 @@ def do_check_select_options(ctx, label: str = None, column: str = None,
     candidates = ctx.label_of(label)
     selected_key = f"selected_{label}"
     ctx.vars.pop(selected_key, None)
+    resolved_query = str(ctx.resolve(query)) if query is not None else None
+    if resolved_query:
+        # 远程联想下拉关闭时可能清空查询结果，必须在同一次展开中完成
+        # “输入查询词 -> 等待异步选项 -> 选择”，不能先 list_options 再重开。
+        base = len(ctx.console_errors)
+        try:
+            picked = ui.search_select(page, candidates, resolved_query)
+        except Exception as e:
+            raise AssertionWarning(
+                f"联想下拉 '{label}' 输入 '{resolved_query}' 后未加载出可选项，"
+                f"跳过筛选校验：{type(e).__name__}")
+        ctx.vars[selected_key] = picked
+        do_search(ctx)
+        if column:
+            try:
+                vals = ui.column_values(page, ctx.column_of(column))
+                bad = [v for v in vals if not _filter_value_matches(v, picked)]
+                if bad:
+                    _fail(
+                        f"联想下拉 '{label}' 选中 '{picked}' 后列 '{column}' "
+                        f"有 {len(bad)}/{len(vals)} 行不符: {bad[:3]}")
+            except LookupError:
+                pass
+        errs = [e for e in ctx.console_errors[base:]
+                if "ResizeObserver" not in e and "favicon" not in e]
+        if errs:
+            _fail(f"联想下拉 '{label}' 触发报错: {errs[0][:100]}")
+        return f"联想下拉 '{label}' 输入查询词并选择 '{picked}'，筛选正常 ✓"
+
     try:
         raw_opts = ui.list_options(page, candidates)
     except Exception as e:

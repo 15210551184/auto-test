@@ -1031,30 +1031,23 @@ def to_config(report: Dict[str, Any], name: Optional[str] = None,
         label = f["label"]
         col = _match_column(label, headers)
         if not f.get("options"):
-            # filterable/remote 下拉（如加盟商、负责人、手机号）只有输入查询词
-            # 后才返回联想项，初始 options 为空不是“没有筛选项”。用表格首行
-            # 的真实值查询并选中联想项，既可执行，又能继续做列值断言。
+            # 扫描时没有枚举到选项，不代表页面没有这个筛选项。远程联想下拉
+            # 往往只有执行时输入查询词才返回选项；普通异步下拉也可能只是扫描
+            # 窗口内尚未加载完成。因此无条件生成用例，把“展开/等待/选择”推迟
+            # 到运行阶段。能从表格首行取到对应值时顺便作为远程查询词。
             seed = sample.get(col) if col else None
-            placeholder = str(f.get("placeholder") or "")
-            looks_searchable = bool(
-                f.get("searchable") or re.search(
-                    r"(请输入|输入|搜索|search|enter|type)",
-                    placeholder, re.I))
-            if looks_searchable and seed:
+            params = {"label": label}
+            if col:
+                params["column"] = col
+            if seed:
                 query = str(seed).strip()
                 if query and len(query) <= 40:
-                    steps = [
-                        {"search_select": {"label": label, "query": query}},
-                        {"search": None},
-                    ]
-                    if col:
-                        steps.append({"assert_column_all": {
-                            "column": col, "contains": query}})
-                    cases.append({
-                        "name": f"筛选-{label}（联想搜索）",
-                        "tags": ["search"],
-                        "steps": steps,
-                    })
+                    params["query"] = query
+            cases.append({
+                "name": f"筛选-{label}（运行时取选项）",
+                "tags": ["search"],
+                "steps": [{"check_select_options": params}],
+            })
             continue
         steps = []
         deps = dependency_chain(f)

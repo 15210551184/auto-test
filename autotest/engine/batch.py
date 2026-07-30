@@ -64,7 +64,7 @@ DEFAULT_CONCURRENCY = 2
 STAGGER_DELAY_SEC = 2
 
 # 修改扫描报告结构或 scanner 的识别语义时递增，使旧缓存自动失效。
-SCAN_CACHE_VERSION = 5
+SCAN_CACHE_VERSION = 6
 
 
 def _log(cb, msg):
