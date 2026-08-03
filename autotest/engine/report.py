@@ -97,6 +97,10 @@ display:flex;gap:8px;align-items:center;background:#fafbfc}
 .api-call-body pre{margin:4px 0 10px;padding:8px;background:#f5f6f8;border-radius:4px;
 overflow-x:auto;white-space:pre-wrap;word-break:break-all;font-size:11.5px}
 .api-call-body .k{color:#8a9099;font-size:11px;text-transform:uppercase;letter-spacing:.04em}
+.export-api{margin:10px 0;padding:10px 12px;border:1px solid #cfe0ff;border-radius:7px;background:#f4f8ff;font-size:12px}
+.export-api .title{font-weight:700;color:#1d4f91;margin-bottom:6px}.export-api .line{display:flex;gap:8px;align-items:flex-start}
+.export-api .method{font-family:ui-monospace,Menlo,monospace;font-weight:700;color:#0052d9}.export-api .url{word-break:break-all;color:#30343b}
+.export-api .meta{margin-top:5px;color:#707780}
 """
 
 
@@ -124,6 +128,21 @@ def _detail_html(detail: Optional[dict]) -> str:
     if dl and dl.get("path"):
         out.append(f'<a class="dl" href="{html.escape(dl["path"])}" download>⤓ '
                   f'{html.escape(dl.get("label") or "下载文件")}</a>')
+    export_api = detail.get("export_api") or {}
+    if export_api.get("url"):
+        status = export_api.get("status")
+        duration = export_api.get("duration_ms")
+        meta = " · ".join(x for x in (
+            f"状态 {status}" if status is not None else "",
+            f"{duration}ms" if duration is not None else "",
+            export_api.get("content_type") or "",
+        ) if x)
+        out.append(
+            '<div class="export-api"><div class="title">导出调用接口</div>'
+            f'<div class="line"><span class="method">{html.escape(export_api.get("method") or "")}</span>'
+            f'<span class="url">{html.escape(export_api["url"])}</span></div>'
+            f'<div class="meta">{html.escape(meta)}</div></div>'
+        )
     return "".join(out)
 
 

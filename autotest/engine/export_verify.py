@@ -169,19 +169,71 @@ def _download_direct(ctx, timeout: int) -> Optional[str]:
     page = ctx.page
     _phase(ctx, f"导出：点击按钮并等待文件（最多 {max(1, timeout // 1000)}s）")
     downloads, responses = [], []
+    request_started = {}
+    ctx._last_export_api = None
 
     def on_download(download):
         downloads.append(download)
 
-    def on_finished(request):
+    def on_request(request):
+        request_started[request] = time.monotonic()
         try:
-            resp = request.response()
-            if resp and _export_response_name(resp):
-                responses.append(resp)
+            is_api = request.resource_type in ("xhr", "fetch")
+            looks_export = bool(re.search(
+                r"(?:^|[/_-])(export|download|excel|csv)(?:$|[/_?&=-])",
+                urlparse(request.url).path.lower()))
+            if is_api and looks_export:
+                ctx._last_export_api = {
+                    "method": request.method,
+                    "url": request.url,
+                    "status": None,
+                    "duration_ms": None,
+                    "content_type": "",
+                    "content_disposition": "",
+                }
         except Exception:
             pass
 
+    def record_export_response(resp):
+        same_candidate = bool(
+            getattr(ctx, "_last_export_api", None)
+            and ctx._last_export_api.get("url") == getattr(resp, "url", None))
+        if not resp or (not _export_response_name(resp) and not same_candidate):
+            return False
+        request = resp.request
+        headers = {str(k).lower(): str(v)
+                   for k, v in (resp.headers or {}).items()}
+        started = request_started.get(request)
+        ctx._last_export_api = {
+            "method": request.method,
+            "url": resp.url,
+            "status": resp.status,
+            "duration_ms": (int((time.monotonic() - started) * 1000)
+                            if started is not None else None),
+            "content_type": headers.get("content-type", ""),
+            "content_disposition": headers.get("content-disposition", ""),
+        }
+        return True
+
+    def on_response(resp):
+        try:
+            record_export_response(resp)
+        except Exception:
+            pass
+
+    def on_finished(request):
+        try:
+            resp = request.response()
+            if record_export_response(resp):
+                responses.append(resp)
+        except Exception:
+            pass
+        finally:
+            request_started.pop(request, None)
+
     page.on("download", on_download)
+    page.on("request", on_request)
+    page.on("response", on_response)
     page.on("requestfinished", on_finished)
     try:
         buttons = _export_buttons(ctx)
@@ -232,7 +284,9 @@ def _download_direct(ctx, timeout: int) -> Optional[str]:
         return None
     finally:
         for event, handler in (
-                ("download", on_download), ("requestfinished", on_finished)):
+                ("download", on_download), ("request", on_request),
+                ("response", on_response),
+                ("requestfinished", on_finished)):
             try:
                 page.remove_listener(event, handler)
             except Exception:
@@ -316,6 +370,7 @@ def verify_export(ctx, compare_with=None, columns=None, row_count_mode="total",
     # 页面看起来像卡死。现在无论走几种策略，总等待都不会超过配置值。
     export_deadline = export_started + max(1, timeout) / 1000
     api_log_start = len(getattr(ctx, "api_log", None) or [])
+    ctx._last_export_api = None
     if mode in ("direct", "auto"):
         direct_timeout = timeout if mode == "direct" else min(timeout, 20000)
         path = _download_direct(ctx, direct_timeout)
@@ -343,7 +398,10 @@ def verify_export(ctx, compare_with=None, columns=None, row_count_mode="total",
             hint += f" 导出期间接口: {seen}"
         raise AssertionFailed(
             f"导出失败：实际等待约 {waited_ms}ms 仍没拿到文件。{hint}",
-            detail={"images": evidence_images} if evidence_images else None,
+            detail={
+                "images": evidence_images,
+                "export_api": getattr(ctx, "_last_export_api", None),
+            },
         )
 
     size = os.path.getsize(path)
@@ -434,7 +492,11 @@ def verify_export(ctx, compare_with=None, columns=None, row_count_mode="total",
 
     download = {"label": f"导出文件 {Path(path).name}",
                 "path": os.path.relpath(path, ctx.report_root)}
-    detail = {"download": download, "images": evidence_images}
+    detail = {
+        "download": download,
+        "images": evidence_images,
+        "export_api": getattr(ctx, "_last_export_api", None),
+    }
     if problems:
         # 把导出文件本身挂到报告上：导出对不对，光看一句"缺少列 X/Y"判断不了
         # 是"导出真漏了"还是"页面表头识别多了"，直接把文件下下来打开看最快。

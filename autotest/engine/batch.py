@@ -71,7 +71,7 @@ RUN_HEARTBEAT_SEC = 30
 CASE_RUN_TIMEOUT_SEC = 150
 
 # 修改扫描报告结构或 scanner 的识别语义时递增，使旧缓存自动失效。
-SCAN_CACHE_VERSION = 6
+SCAN_CACHE_VERSION = 7
 
 def _log(cb, msg):
     print(msg, flush=True)

@@ -399,15 +399,31 @@ class PageScanner:
         except Exception:
             pass
 
+        field_positions = None
+        try:
+            field_positions = dialog.locator(".el-form-item").evaluate_all(
+                """items => items.map((item, index) => {
+                    const label = (item.querySelector('.el-form-item__label')
+                        ?.textContent || '').trim();
+                    return label ? index : null;
+                }).filter(index => index !== null)"""
+            )
+        except Exception:
+            pass
         try:
             fields = self._scan_dialog_fields(dialog)
         finally:
             # 扫失败也要关掉，否则挡住后面的扫描；复用适配器的关弹窗逻辑，
             # 不在这里维护第二份（这里和运行期用的是同一套 Element UI 约定）
             self._ui.close_dialog(self.page)
-        return {"title": title, "fields": fields} if fields else {}
+        if not fields:
+            return {}
+        result = {"title": title, "fields": fields}
+        if field_positions is not None:
+            result["field_positions"] = field_positions
+        return result
 
-    def scan_dialog_labels(self) -> List[str]:
+    def scan_dialog_labels(self, field_positions: Optional[List[int]] = None) -> List[str]:
         """
         跟 scan_form_schema 走同样的开关弹窗流程，但只取 label 文案、不做
         类型/选项探测——给多语言合并用，过滤条件和 _scan_dialog_fields
@@ -427,12 +443,23 @@ class PageScanner:
             return []
         self.page.wait_for_timeout(300)
         try:
-            labels = dialog.locator(".el-form-item").evaluate_all(
-                """items => items.map(item => (
-                    item.querySelector('.el-form-item__label')?.textContent || ''
-                ).trim().replace(/[：:]\\s*$/, '').trim()
-                  .replace(/^\\*+/, '').trim()).filter(Boolean)"""
-            )
+            if field_positions is not None:
+                # 按默认语言记录的 DOM 下标读取。译文为空时保留占位，不能
+                # filter(Boolean)，否则后面的字段会整体左移或整组被丢弃。
+                labels = dialog.locator(".el-form-item").evaluate_all(
+                    """(items, positions) => positions.map(index => {
+                        const item = items[index];
+                        return (item?.querySelector('.el-form-item__label')
+                            ?.textContent || '').trim().replace(/[：:]\\s*$/, '')
+                            .trim().replace(/^\\*+/, '').trim();
+                    })""", field_positions)
+            else:
+                labels = dialog.locator(".el-form-item").evaluate_all(
+                    """items => items.map(item => (
+                        item.querySelector('.el-form-item__label')?.textContent || ''
+                    ).trim().replace(/[：:]\\s*$/, '').trim()
+                      .replace(/^\\*+/, '').trim()).filter(Boolean)"""
+                )
         except Exception:
             labels = []
         finally:
@@ -796,6 +823,7 @@ class PageScanner:
         canonical_headers = _unique(report.get("table", {}).get("headers", []))
         canonical_dialog_labels = [f["label"] for f in
                                    (report.get("create_form") or {}).get("fields", [])]
+        dialog_positions = (report.get("create_form") or {}).get("field_positions")
         has_create = report.get("buttons", {}).get("create", False)
         baseline_code = default_language_code(languages)
 
@@ -811,8 +839,12 @@ class PageScanner:
             _merge_positional(header_variants, canonical_headers,
                               self.scan_table_headers(), code)
             if has_create and canonical_dialog_labels:
+                translated_dialog_labels = (
+                    self.scan_dialog_labels(dialog_positions)
+                    if dialog_positions is not None else self.scan_dialog_labels()
+                )
                 _merge_positional(label_variants, canonical_dialog_labels,
-                                  self.scan_dialog_labels(), code)
+                                  translated_dialog_labels, code)
 
         return label_variants, header_variants
 

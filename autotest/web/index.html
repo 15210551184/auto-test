@@ -416,7 +416,16 @@ header .logout:hover{color:var(--fail);background:#fff1f2}
             <button class="caution" id="btnRescan">重新扫描并生成</button>
             <button id="btnRedetectAll" title="遍历全部已生成页面，只修正 list_api，不覆盖人工用例">全局重探接口</button>
           </div>
-          <div class="hint" title="重新生成 YAML 优先使用页面结构缓存；全局重探只更新列表接口，不会覆盖人工编辑的用例。">重新生成走缓存；接口等待异常时可全局重探</div>
+          <div class="exec-lang-row" style="margin-top:8px">
+            <label for="scanConcurrency">扫描并发</label>
+            <select id="scanConcurrency" style="width:auto">
+              <option value="1">1（低内存）</option>
+              <option value="2" selected>2（推荐）</option>
+              <option value="3">3</option>
+              <option value="4">4（高配置服务器）</option>
+            </select>
+          </div>
+          <div class="hint" title="重新生成 YAML 优先使用页面结构缓存；全局重探只更新列表接口，不会覆盖人工编辑的用例。">重新生成走缓存；强制扫描可并行打开多个页面，内存不足时改回 1</div>
         </div>
         <div class="step">
           <div class="step-h">3 · 执行测试</div>
@@ -1073,6 +1082,7 @@ async function trigger(action, overwrite=false, forceScan=false){
   const body={action:action,project:proj.dir,overwrite:overwrite};
   if(action==='batch-scan'){
     body.force_scan=forceScan;
+    body.concurrency=Number($('#scanConcurrency').value)||2;
   }
   if(action==='batch-run'){
     const tags=selectedTags();
@@ -1099,6 +1109,7 @@ $('#btnClear').onclick=()=>{term.innerHTML='<span class="empty">日志已清空�
 function setBusy(b){
   ['#btnDiscover','#btnDiscoverIncremental','#btnGen','#btnRegen','#btnRescan','#btnRedetectAll','#btnRunSel','#btnNewProj','#yamlProbeLang'].forEach(s=>$(s).disabled=b);
   $('#btnStop').disabled=!b;
+  $('#scanConcurrency').disabled=b;
   if(!b)$('#btnStop').textContent='终止';
   if(b) setState('busy','执行中');
 }

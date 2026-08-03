@@ -130,6 +130,28 @@ class ExportDetailAttachmentTests(unittest.TestCase):
         self.assertEqual("导出文件内容", detail["images"][1]["label"])
         self.assertEqual(["export_list_page"], ctx.shot_calls)
 
+    def test_success_attaches_the_synchronous_export_api(self):
+        EV._read_table = lambda path: [{"国家": "中国"}]
+        ctx = FakeCtx(self.tmp.name, ui_headers=["国家"], total=1)
+
+        def downloaded(current_ctx, timeout):
+            current_ctx._last_export_api = {
+                "method": "POST",
+                "url": "http://example.test/api/country/export",
+                "status": 200,
+                "duration_ms": 321,
+                "content_type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            }
+            return str(self.fake_path)
+
+        EV._download_direct = downloaded
+        _, detail = EV.verify_export(ctx)
+
+        self.assertEqual("POST", detail["export_api"]["method"])
+        self.assertEqual("http://example.test/api/country/export",
+                         detail["export_api"]["url"])
+        self.assertEqual(200, detail["export_api"]["status"])
+
     def test_translated_headers_are_compared_by_canonical_name(self):
         columns = ["国家编码", "国家名称", "状态"]
         EV._read_table = lambda path: [{

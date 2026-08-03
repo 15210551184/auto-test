@@ -135,6 +135,33 @@ class ScanLanguageVariantsOrchestrationTests(unittest.TestCase):
         label_v, _ = self.sc.scan_language_variants(languages, report)
         self.assertEqual({"名称": {"en": "Name"}, "备注": {"en": "Remark"}}, label_v)
 
+    def test_dialog_positions_keep_other_translations_when_one_is_empty(self):
+        report = {
+            "form_fields": [],
+            "table": {"headers": []},
+            "buttons": {"create": True},
+            "create_form": {
+                "fields": [{"label": "名称"}, {"label": "公里数"}, {"label": "价格"}],
+                "field_positions": [0, 2, 3],
+            },
+        }
+        languages = {"switcher_trigger": ".lang", "options": {"en": "English"},
+                    "scan_languages": ["en"]}
+        received_positions = []
+        self.sc.switch_language = lambda langs, code: True
+        self.sc.scan_form_labels = lambda: []
+        self.sc.scan_table_headers = lambda: []
+
+        def translated(positions):
+            received_positions.extend(positions)
+            return ["Name", "", "Price"]
+
+        self.sc.scan_dialog_labels = translated
+        label_v, _ = self.sc.scan_language_variants(languages, report)
+
+        self.assertEqual([0, 2, 3], received_positions)
+        self.assertEqual({"名称": {"en": "Name"}, "价格": {"en": "Price"}}, label_v)
+
     def test_no_dialog_scan_when_no_create_button(self):
         report = {
             "form_fields": [],

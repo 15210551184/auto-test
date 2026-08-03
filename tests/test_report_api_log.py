@@ -123,6 +123,20 @@ class DetailHtmlTests(unittest.TestCase):
         out = _detail_html({"download": {"label": "x"}})
         self.assertNotIn("<a", out)
 
+    def test_synchronous_export_api_is_rendered_in_detail(self):
+        out = _detail_html({"export_api": {
+            "method": "POST",
+            "url": "http://example.test/api/country/export?a=1&b=2",
+            "status": 200,
+            "duration_ms": 321,
+            "content_type": "application/vnd.ms-excel",
+        }})
+        self.assertIn("导出调用接口", out)
+        self.assertIn("POST", out)
+        self.assertIn("/api/country/export?a=1&amp;b=2", out)
+        self.assertIn("状态 200", out)
+        self.assertIn("321ms", out)
+
     def test_html_special_chars_are_escaped(self):
         out = _detail_html({
             "images": [{"label": "<script>alert(1)</script>", "path": "a.png"}],

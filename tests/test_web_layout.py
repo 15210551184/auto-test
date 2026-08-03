@@ -133,5 +133,12 @@ class YamlEditorSearchTests(unittest.TestCase):
         self.assertIn("text.setSelectionRange(start,start+input.value.length)", INDEX_HTML)
 
 
+class ScanConcurrencyTests(unittest.TestCase):
+    def test_scan_concurrency_defaults_to_two_and_is_sent_to_server(self):
+        self.assertIn('id="scanConcurrency"', INDEX_HTML)
+        self.assertIn('<option value="2" selected>2（推荐）</option>', INDEX_HTML)
+        self.assertIn("body.concurrency=Number($('#scanConcurrency').value)||2", INDEX_HTML)
+
+
 if __name__ == "__main__":
     unittest.main()

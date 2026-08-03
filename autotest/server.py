@@ -504,6 +504,12 @@ def api_run():
             cmd.append("--force-scan")
         if action == "batch-scan" and body.get("tags"):
             cmd += ["--tags"] + body["tags"]
+        if action == "batch-scan":
+            try:
+                scan_concurrency = max(1, min(4, int(body.get("concurrency", 2))))
+            except (TypeError, ValueError):
+                scan_concurrency = 2
+            cmd += ["--concurrency", str(scan_concurrency)]
         if action == "batch-run" and body.get("tags"):
             cmd += ["--tags"] + body["tags"]
         if action == "batch-run" and body.get("exclude_tags"):
