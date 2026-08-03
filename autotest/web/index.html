@@ -1030,13 +1030,11 @@ async function trigger(action, overwrite=false, forceScan=false){
     return toast('请先勾选要测试的菜单',true);
   if(action==='batch-run'&&!sel.some(p=>p.has_config))
     return toast('勾选的页面还没有用例，请先点「生成用例」',true);
-  if((action==='batch-scan'||action==='batch-run')&&!selectedTags().length)
+  if(action==='batch-run'&&!selectedTags().length)
     return toast('请至少选择一个用例类别',true);
   const body={action:action,project:proj.dir,overwrite:overwrite};
   if(action==='batch-scan'){
     body.force_scan=forceScan;
-    const tags=selectedTags();
-    if(tags.length) body.tags=tags;
   }
   if(action==='batch-run'){
     const tags=selectedTags();

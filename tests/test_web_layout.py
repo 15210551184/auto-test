@@ -45,6 +45,12 @@ class DefaultExecutionTagsTests(unittest.TestCase):
         self.assertIn("请至少选择一个用例类别", INDEX_HTML)
         self.assertIn("至少保留一个用例类别", INDEX_HTML)
 
+    def test_execution_categories_do_not_limit_yaml_generation(self):
+        scan_block = INDEX_HTML.split("if(action==='batch-scan'){", 1)[1].split("}", 1)[0]
+        self.assertNotIn("selectedTags", scan_block)
+        self.assertNotIn("body.tags", scan_block)
+        self.assertIn("if(action==='batch-run'&&!selectedTags().length)", INDEX_HTML)
+
     def test_categories_have_short_explanations_and_risk_marker(self):
         self.assertIn("加载、表头、基础错误", INDEX_HTML)
         self.assertIn("文件、表头及数据比对", INDEX_HTML)
