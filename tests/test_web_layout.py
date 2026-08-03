@@ -123,5 +123,15 @@ class ReportDownloadTests(unittest.TestCase):
         self.assertIn('>异常接口</a>', INDEX_HTML)
 
 
+class YamlEditorSearchTests(unittest.TestCase):
+    def test_yaml_editor_has_find_controls(self):
+        for element_id in ("yamlSearch", "yamlFindBar", "yamlFind", "yamlFindPrev", "yamlFindNext"):
+            self.assertIn(f'id="{element_id}"', INDEX_HTML)
+
+    def test_yaml_editor_supports_keyboard_find_and_match_selection(self):
+        self.assertIn("(e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='f'", INDEX_HTML)
+        self.assertIn("text.setSelectionRange(start,start+input.value.length)", INDEX_HTML)
+
+
 if __name__ == "__main__":
     unittest.main()

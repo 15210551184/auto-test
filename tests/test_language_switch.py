@@ -82,11 +82,18 @@ class LanguageSwitchTests(unittest.TestCase):
         self.assertEqual(0, hidden.clicked)
         self.assertEqual(1, visible.clicked)
 
+    def test_hidden_options_in_trigger_text_do_not_fake_current_language(self):
+        visible = Item(visible=True)
+        page = Page([visible], trigger_text="简体中文 英文 法语 阿拉伯语")
+        self.assertTrue(switch_page_language(page, LANGUAGES, "en"))
+        self.assertEqual(1, visible.clicked)
+
     def test_active_target_is_treated_as_already_selected(self):
         active = Item(visible=True, classes="el-dropdown-menu__item is-active")
         page = Page([active])
         self.assertFalse(switch_page_language(page, LANGUAGES, "zh"))
         self.assertEqual(0, active.clicked)
+        self.assertEqual(2, page.trigger.clicked)
 
 
 if __name__ == "__main__":

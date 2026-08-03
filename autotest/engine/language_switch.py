@@ -59,8 +59,11 @@ def switch_page_language(page, languages: Dict[str, Any], code: str,
     target_text = str(options[code])
     trigger = page.locator(trigger_selector).first
     try:
-        shown = (trigger.inner_text(timeout=500) or "").strip()
-        if shown and target_text in shown:
+        shown = " ".join((trigger.inner_text(timeout=500) or "").split())
+        normalized_target = " ".join(target_text.split())
+        # 下拉触发器的 DOM 有时同时包含当前值和所有隐藏选项。只有可见文本
+        # 与目标语言完全相同时才可判定无需切换，不能用包含关系。
+        if shown and shown == normalized_target:
             return False
     except Exception:
         pass
@@ -71,6 +74,14 @@ def switch_page_language(page, languages: Dict[str, Any], code: str,
     if target is None:
         raise LookupError(f"语言菜单里找不到可见选项 '{target_text}'")
     if _is_selected_or_disabled(target):
+        # 菜单已经被上面的 trigger.click() 展开。当前语言通常以 disabled /
+        # active 菜单项表示；确认后必须把菜单收起，否则扫描下一种语言时再点
+        # trigger 会把菜单关闭，随后便误报“找不到可见选项”。
+        try:
+            trigger.click(timeout=5000)
+            page.wait_for_timeout(100)
+        except Exception:
+            pass
         return False
     target.click(timeout=5000)
     page.wait_for_timeout(1000)

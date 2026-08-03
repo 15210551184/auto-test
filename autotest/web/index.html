@@ -322,6 +322,9 @@ header .logout:hover{color:var(--fail);background:#fff1f2}
   .tags{display:none}
   .card.maximized{top:12px;left:12px;right:12px;bottom:12px}
 }
+.yaml-find{display:none;align-items:center;gap:7px;margin-bottom:8px}
+.yaml-find.show{display:flex}.yaml-find input{flex:1;min-width:0}.yaml-find span{min-width:52px;text-align:center;color:var(--muted);font-size:12px}
+.yaml-find button{padding:7px 10px;white-space:nowrap}
 @media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
 </style>
 </head>
@@ -508,7 +511,7 @@ header .logout:hover{color:var(--fail);background:#fff1f2}
   </div>
 </div>
 <div id="toast"></div>
-<div class="mask" id="yamlMask"><div class="modal" style="width:860px"><h3 id="yamlTitle">编辑 YAML</h3><div class="body"><textarea id="yamlText" spellcheck="false"></textarea></div><div class="foot"><button class="link" id="yamlProbeLang" style="margin-right:auto;display:none" title="打开首页、点开语言切换菜单，把候选文案读出来，省得手动 F12 抄">探测语言选项</button><button id="yamlCancel">取消</button><button class="primary" id="yamlSave">保存</button></div></div></div>
+<div class="mask" id="yamlMask"><div class="modal" style="width:860px"><h3 id="yamlTitle">编辑 YAML</h3><div class="body"><div class="yaml-find" id="yamlFindBar"><input id="yamlFind" type="search" placeholder="搜索 YAML（Ctrl/⌘+F）"><span id="yamlFindCount">0/0</span><button id="yamlFindPrev" title="上一个（Shift+Enter）">上一个</button><button id="yamlFindNext" title="下一个（Enter）">下一个</button><button id="yamlFindClose">关闭</button></div><textarea id="yamlText" spellcheck="false"></textarea></div><div class="foot"><button class="link" id="yamlProbeLang" style="margin-right:auto;display:none" title="打开首页、点开语言切换菜单，把候选文案读出来，省得手动 F12 抄">探测语言选项</button><button id="yamlSearch">查找</button><button id="yamlCancel">取消</button><button class="primary" id="yamlSave">保存</button></div></div></div>
 <div class="mask" id="explainMask"><div class="modal" style="width:640px">
   <h3 id="explainTitle">用例说明</h3>
   <div class="body" id="explainBody" style="max-height:65vh;overflow:auto"></div>
@@ -782,12 +785,47 @@ function openYamlEditor(opts){
   // 区分保存目标和保存后的收尾动作，不用维护两份几乎一样的弹窗
   $('#yamlTitle').textContent=opts.title;
   $('#yamlText').value=opts.content;
+  closeYamlFind();
   $('#yamlMask').classList.add('show');
   $('#yamlMask').dataset.kind=opts.kind;
   $('#yamlMask').dataset.saveUrl=opts.saveUrl;
   $('#yamlMask').dataset.i=opts.i!=null?opts.i:'';
   $('#yamlProbeLang').style.display=opts.kind==='project'?'':'none';
 }
+let yamlFindIndex=-1;
+function yamlMatches(){
+  const text=$('#yamlText').value.toLocaleLowerCase(),needle=$('#yamlFind').value.toLocaleLowerCase(),out=[];
+  if(!needle)return out;
+  for(let pos=0;(pos=text.indexOf(needle,pos))>=0;pos+=Math.max(needle.length,1))out.push(pos);
+  return out;
+}
+function selectYamlMatch(delta){
+  const matches=yamlMatches(),input=$('#yamlFind'),text=$('#yamlText');
+  if(!matches.length){yamlFindIndex=-1;$('#yamlFindCount').textContent='0/0';return;}
+  yamlFindIndex=(yamlFindIndex+delta+matches.length)%matches.length;
+  const start=matches[yamlFindIndex];
+  text.focus();text.setSelectionRange(start,start+input.value.length);
+  $('#yamlFindCount').textContent=(yamlFindIndex+1)+'/'+matches.length;
+}
+function openYamlFind(){
+  $('#yamlFindBar').classList.add('show');
+  const input=$('#yamlFind'),text=$('#yamlText');
+  if(!input.value&&text.selectionStart!==text.selectionEnd)input.value=text.value.slice(text.selectionStart,text.selectionEnd);
+  input.focus();input.select();yamlFindIndex=-1;
+  if(input.value)selectYamlMatch(1);
+}
+function closeYamlFind(){
+  $('#yamlFindBar').classList.remove('show');$('#yamlFind').value='';$('#yamlFindCount').textContent='0/0';yamlFindIndex=-1;
+}
+$('#yamlSearch').onclick=openYamlFind;
+$('#yamlFindClose').onclick=closeYamlFind;
+$('#yamlFindNext').onclick=()=>selectYamlMatch(1);
+$('#yamlFindPrev').onclick=()=>selectYamlMatch(-1);
+$('#yamlFind').oninput=()=>{yamlFindIndex=-1;selectYamlMatch(1);};
+$('#yamlFind').onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();selectYamlMatch(e.shiftKey?-1:1);}};
+document.addEventListener('keydown',e=>{
+  if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='f'&&$('#yamlMask').classList.contains('show')){e.preventDefault();openYamlFind();}
+});
 $('#yamlCancel').onclick=()=>$('#yamlMask').classList.remove('show');
 $('#yamlSave').onclick=async()=>{
   const mask=$('#yamlMask'),url=mask.dataset.saveUrl;
