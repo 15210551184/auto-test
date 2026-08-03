@@ -566,7 +566,25 @@ def run_case(ctx: Context, case: Case) -> CaseResult:
                 ctx.set_phase("切换页面语言")
             REGISTRY["switch_language"](ctx, to=ctx.target_language)
         except Exception as e:
-            return CaseResult(case.name, Status.ERROR, error=f"切换语言失败: {e}")
+            # 部分页面列表接口很慢：domcontentloaded/list_api 等待结束时，顶栏
+            # 的 .lang-select 仍未挂载，第一次点击会耗尽 5 秒。仅对 Timeout
+            # 做一次刷新重试；配置错误（未知语言/选择器）仍立即失败，不能用
+            # 重试掩盖。刷新也会顺带清理之前导航留下的 response waiter。
+            if "Timeout" not in type(e).__name__ and "Timeout" not in str(e):
+                return CaseResult(case.name, Status.ERROR,
+                                  error=f"切换语言失败: {e}")
+            try:
+                if hasattr(ctx, "set_phase"):
+                    ctx.set_phase("语言入口未就绪，刷新后重试")
+                ctx.page.reload(wait_until="domcontentloaded", timeout=30000)
+                ctx.page.wait_for_timeout(1200)
+                if ctx.config.login and is_login_page(ctx.page):
+                    ensure_logged_in(ctx.page, ctx.config.url, ctx.config.login)
+                REGISTRY["switch_language"](ctx, to=ctx.target_language)
+            except Exception as retry_error:
+                return CaseResult(
+                    case.name, Status.ERROR,
+                    error=f"切换语言失败（刷新重试仍失败）: {retry_error}")
 
     results, status = [], Status.PASS
     stopped_at = None

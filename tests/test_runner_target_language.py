@@ -24,6 +24,9 @@ class FakePage:
     def wait_for_timeout(self, ms):
         pass
 
+    def reload(self, *a, **kw):
+        pass
+
 
 class FakeConfig:
     list_api = None
@@ -96,6 +99,25 @@ class TargetLanguageSwitchTests(unittest.TestCase):
         self.assertEqual(Status.ERROR, result.status)
         self.assertIn("切换语言失败", result.error)
         self.assertEqual([], ran)   # 切换失败不该继续跑用例自己的步骤
+
+    def test_switch_timeout_refreshes_and_retries_once(self):
+        import autotest.engine.runner as runner_mod
+        attempts = []
+
+        def flaky_switch(ctx, to=None, **kw):
+            attempts.append(to)
+            if len(attempts) == 1:
+                raise RuntimeError("Locator.click: Timeout 5000ms exceeded")
+            return "ok"
+
+        runner_mod.REGISTRY["switch_language"] = flaky_switch
+        ctx = FakeCtx(target_language="fr")
+        case = Case(name="导出", steps=[Step.from_raw({"__noop": None})], tags=[])
+
+        result = run_case(ctx, case)
+
+        self.assertEqual(["fr", "fr"], attempts)
+        self.assertEqual(Status.PASS, result.status)
 
 
 if __name__ == "__main__":
