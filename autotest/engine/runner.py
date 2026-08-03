@@ -1,5 +1,6 @@
 """执行引擎：上下文、配置加载、用例编排"""
 import html
+import inspect
 import os
 import random
 import re
@@ -72,6 +73,7 @@ class Context:
         # 执行”，无法判断是在打开页面、等接口、等下载还是读 Excel。
         self.current_phase = "初始化"
         self.phase_started = time.monotonic()
+        self.case_deadline: Optional[float] = None
         self.out_dir = out_dir
         # report_root：截图相对路径要相对谁计算——单页执行时 report.html 就写
         # 在 out_dir 里，两者相同；批量执行时每个页面各有自己的子目录
@@ -93,6 +95,11 @@ class Context:
 
     def phase_snapshot(self):
         return self.current_phase, max(0, int(time.monotonic() - self.phase_started))
+
+    def remaining_case_ms(self, fallback: int = 150000) -> int:
+        if self.case_deadline is None:
+            return fallback
+        return max(0, int((self.case_deadline - time.monotonic()) * 1000))
 
     def _hook(self):
         self.page.on("console", lambda m: (
@@ -439,7 +446,27 @@ def run_step(ctx: Context, step: Step) -> StepResult:
         }
         if hasattr(ctx, "set_phase"):
             ctx.set_phase(phase_names.get(step.action, f"执行步骤：{step.action}"))
-        out = fn(ctx, **step.params)
+        params = dict(step.params)
+        remaining = ctx.remaining_case_ms() if hasattr(ctx, "remaining_case_ms") else 150000
+        if remaining <= 0:
+            raise TimeoutError("当前用例超过 150 秒，已终止")
+        timeout_param = inspect.signature(fn).parameters.get("timeout")
+        configured_timeout = params.get("timeout")
+        if configured_timeout is None and timeout_param is not None \
+                and timeout_param.default is not inspect.Parameter.empty:
+            configured_timeout = timeout_param.default
+        if configured_timeout is not None:
+            params["timeout"] = min(int(configured_timeout), remaining)
+        if step.action == "wait":
+            key = "value" if params.get("value") is not None else "ms"
+            params[key] = min(int(params.get(key, 500)), remaining)
+        try:
+            # 仍保留原来的单次 Playwright 30 秒上限；用例总预算只负责进一步
+            # 收紧，不能反过来把一次 locator 等待放宽到 150 秒。
+            ctx.page.set_default_timeout(max(1, min(30000, remaining)))
+        except AttributeError:
+            pass
+        out = fn(ctx, **params)
         # 动作可以只返回一句消息，也可以返回 (消息, detail)——detail 是给
         # 报告页面的结构化附件（对比截图、下载链接），不是所有动作都有。
         msg, detail = out if isinstance(out, tuple) else (out, None)
@@ -477,6 +504,9 @@ def run_case(ctx: Context, case: Case) -> CaseResult:
     ctx.suppress_search_evidence = any(
         step.action == "export_and_verify" for step in case.steps)
     frag = ctx.config.list_api
+    remaining = ctx.remaining_case_ms() if hasattr(ctx, "remaining_case_ms") else 150000
+    if remaining <= 0:
+        return CaseResult(case.name, Status.ERROR, error="当前用例超过 150 秒，已终止")
     if frag:
         # 等这次导航触发的列表接口真正返回，比固定等待更准；expect_response
         # 必须包住触发动作（goto）本身才能等到它，不能在 goto 之后才注册——
@@ -486,7 +516,8 @@ def run_case(ctx: Context, case: Case) -> CaseResult:
             with ctx.page.expect_response(
                 lambda r: frag in r.url and r.status == 200, timeout=5000
             ):
-                ctx.page.goto(ctx.config.url, wait_until="domcontentloaded", timeout=60000)
+                ctx.page.goto(ctx.config.url, wait_until="domcontentloaded",
+                              timeout=min(60000, remaining))
             ctx.page.wait_for_timeout(500)
         except Exception:
             # 旧 YAML 可能把扫描表单时请求的国家/城市/加盟商下拉接口写成
@@ -510,7 +541,8 @@ def run_case(ctx: Context, case: Case) -> CaseResult:
                 except Exception:
                     ctx.page.wait_for_timeout(3000)
     else:
-        ctx.page.goto(ctx.config.url, wait_until="domcontentloaded", timeout=60000)
+        ctx.page.goto(ctx.config.url, wait_until="domcontentloaded",
+                      timeout=min(60000, remaining))
         ctx.page.wait_for_timeout(1500)
 
     # 长时间运行中 session 可能过期，掉回登录页就就地重登，

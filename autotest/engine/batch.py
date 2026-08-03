@@ -67,6 +67,10 @@ STAGGER_DELAY_SEC = 2
 # 一条用例可能在等导出文件或慢接口，旧逻辑直到用例结束才打印任何内容，
 # 看起来像任务彻底卡死。定期打印心跳，让日志明确显示仍在执行哪条用例。
 RUN_HEARTBEAT_SEC = 30
+# 单条用例的兜底预算。正常动作本身通常 5~90 秒内有明确超时；这个上限
+# 防止异常页面长期占住 worker，同时不会像“整页 60 秒”那样误杀有十几条
+# 用例的正常页面。
+CASE_RUN_TIMEOUT_SEC = 150
 
 # 修改扫描报告结构或 scanner 的识别语义时递增，使旧缓存自动失效。
 SCAN_CACHE_VERSION = 6
@@ -601,6 +605,7 @@ def run_selected(dir_name: str, out_dir: str,
                     break
                 with lock:
                     emit_task_progress(name, case_index, len(cases))
+                ctx.case_deadline = time.monotonic() + CASE_RUN_TIMEOUT_SEC
                 case_started = time.monotonic()
                 case_done = threading.Event()
                 _log(on_log, f"{tag} ▶ {case.name} ...")
