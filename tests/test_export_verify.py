@@ -40,6 +40,7 @@ class FakeCtx:
         self.config = types.SimpleNamespace(
             export_mode=export_mode,
             header_variants=header_variants or {},
+            cases=[],
         )
         self.data = {}
         self.shot_calls = []
@@ -159,6 +160,48 @@ class ExportDetailAttachmentTests(unittest.TestCase):
         )
 
         self.assertIn("抽样比对 3 个字段一致", msg)
+
+    def test_old_config_without_variants_uses_runtime_headers_safely(self):
+        columns = ["国家编码", "国家名称", "状态"]
+        EV._read_table = lambda path: [{
+            "Code du pays": "SN",
+            "Nom du pays": "Le Sénégal",
+            "Statut": "Actif",
+        }]
+        ctx = FakeCtx(
+            self.tmp.name,
+            ui_headers=["Code pays", "Nom pays", "Statut"],
+            total=1,
+        )
+        ctx.config.cases = [types.SimpleNamespace(steps=[
+            types.SimpleNamespace(
+                action="assert_headers",
+                params={"contains": columns},
+            ),
+        ])]
+        ctx.data["page_data"] = [{
+            "国家编码": "SN",
+            "国家名称": "Le Sénégal",
+            "状态": "Actif",
+        }]
+
+        msg, _ = EV.verify_export(
+            ctx,
+            compare_with="page_data",
+            columns=columns,
+        )
+
+        self.assertIn("抽样比对 3 个字段一致", msg)
+
+    def test_runtime_mapping_refuses_different_column_counts(self):
+        ctx = FakeCtx(self.tmp.name, ui_headers=["Code pays", "Nom pays"])
+        ctx.config.cases = [types.SimpleNamespace(steps=[
+            types.SimpleNamespace(
+                action="assert_headers",
+                params={"contains": ["国家编码", "国家名称", "状态"]},
+            ),
+        ])]
+        self.assertEqual({}, EV._runtime_header_map(ctx, {}))
 
     def test_configured_columns_compare_values_beyond_first_five(self):
         # 页面第 7 个可比字段“加盟商”显示名称，而导出错误地写了内部 ID。
