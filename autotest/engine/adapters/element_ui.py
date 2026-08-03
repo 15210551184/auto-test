@@ -11,7 +11,7 @@ from typing import Any, Dict, List, Optional, Union
 from playwright.sync_api import Page, Locator
 
 from ..i18n_terms import words as _i18n_words
-from ..lang_variants import reverse_map as _reverse_variant_map
+from .. import lang_variants as LV
 
 # label/column 参数现在既可以是单个字符串，也可以是多语言候选文案列表
 # （调用方按 ctx.config.label_variants 解析出来的）——单字符串场景下面全部
@@ -299,13 +299,13 @@ class ElementUIAdapter:
         """
         data = self._read(page, table)
         raw_headers = data["headers"]
-        canon_of = _reverse_variant_map(header_variants) if header_variants else {}
+        canon_of = LV.reverse_map(header_variants) if header_variants else {}
         out = []
         for cells in data["rows"]:
             row = {}
             for j, h in enumerate(raw_headers):
                 if h:  # 跳过复选框/展开等空表头列，但下标 j 仍对齐 td
-                    key = canon_of.get(h, h)
+                    key = LV.canonical_name(h, canon_of)
                     row[key] = cells[j] if j < len(cells) else ""
             out.append(row)
         return out
@@ -459,7 +459,7 @@ class ElementUIAdapter:
         两边不翻译成同一套名字，语言一切换比对就全错位。
         """
         dlg = self.dialog(page)
-        canon_of = _reverse_variant_map(header_variants) if header_variants else {}
+        canon_of = LV.reverse_map(header_variants) if header_variants else {}
         out: Dict[str, str] = {}
         items = dlg.locator(".el-form-item")
         for i in range(items.count()):
@@ -485,7 +485,7 @@ class ElementUIAdapter:
                         val = re.sub(r"\s+", " ", content.inner_text()).strip()
                 except Exception:
                     pass
-            out[canon_of.get(label, label)] = val
+            out[LV.canonical_name(label, canon_of)] = val
         return out
 
     def detail_values(self, page: Page,
@@ -497,7 +497,7 @@ class ElementUIAdapter:
         header_variants 的作用同 dialog_field_values。
         """
         dlg = self.dialog(page)
-        canon_of = _reverse_variant_map(header_variants) if header_variants else {}
+        canon_of = LV.reverse_map(header_variants) if header_variants else {}
         out: Dict[str, str] = {}
 
         # 1. el-descriptions 这类结构化的，直接按 label/content 配对
@@ -509,7 +509,7 @@ class ElementUIAdapter:
                 v = it.locator(".el-descriptions-item__content").first.inner_text().strip()
                 if k:
                     k = k.rstrip(":：").strip()
-                    out[canon_of.get(k, k)] = v
+                    out[LV.canonical_name(k, canon_of)] = v
             except Exception:
                 continue
         if out:
@@ -526,7 +526,7 @@ class ElementUIAdapter:
             if m:
                 k, v = m.group(1).strip(), m.group(2).strip()
                 if k:
-                    out[canon_of.get(k, k)] = v
+                    out[LV.canonical_name(k, canon_of)] = v
         return out
 
     def form_error_labels(self, page: Page,
@@ -537,7 +537,7 @@ class ElementUIAdapter:
         返回报错项的 label 列表（翻译回 canonical 名字，理由同上）。
         """
         dlg = self.dialog(page)
-        canon_of = _reverse_variant_map(header_variants) if header_variants else {}
+        canon_of = LV.reverse_map(header_variants) if header_variants else {}
         out = []
         items = dlg.locator(".el-form-item.is-error")
         for i in range(items.count()):
@@ -545,7 +545,7 @@ class ElementUIAdapter:
                 lb = items.nth(i).locator(".el-form-item__label").first.inner_text()
                 lb = lb.strip().rstrip(":：").strip().lstrip("*").strip()
                 if lb:
-                    out.append(canon_of.get(lb, lb))
+                    out.append(LV.canonical_name(lb, canon_of))
             except Exception:
                 continue
         return out

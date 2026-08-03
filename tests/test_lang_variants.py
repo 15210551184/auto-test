@@ -1,6 +1,9 @@
 import unittest
 
-from autotest.engine.lang_variants import candidates, reverse_map
+from autotest.engine.lang_variants import (
+    candidates, canonical_name, canonicalize_row, reverse_map,
+    runtime_reverse_map, signature,
+)
 
 
 class CandidatesTests(unittest.TestCase):
@@ -37,6 +40,33 @@ class ReverseMapTests(unittest.TestCase):
         self.assertEqual("国家名称", rmap["Country Name"])
         self.assertEqual("国家名称", rmap["Nom du pays"])
         self.assertEqual("状态", rmap["Status"])
+
+    def test_signatures_handle_word_order_accents_and_articles(self):
+        self.assertEqual(signature("Code pays"), signature("Code du pays"))
+        self.assertEqual(signature("Country Code"), signature("Code of Country"))
+
+    def test_runtime_map_only_uses_equal_length_headers(self):
+        self.assertEqual(
+            {"Code pays": "国家编码", "Nom pays": "国家名称"},
+            runtime_reverse_map({}, ["国家编码", "国家名称"],
+                                ["Code pays", "Nom pays"]),
+        )
+        self.assertEqual({}, runtime_reverse_map(
+            {}, ["国家编码"], ["Code pays", "Nom pays"]))
+
+    def test_fuzzy_mapping_requires_unique_match(self):
+        mapping = {"Code pays": "国家编码"}
+        self.assertEqual("国家编码", canonical_name("Code du pays", mapping))
+        ambiguous = {"Country Code": "国家编码", "Code of Country": "区号"}
+        self.assertEqual("Code Country", canonical_name("Code Country", ambiguous))
+
+    def test_row_collision_does_not_overwrite_data(self):
+        row = canonicalize_row(
+            {"Code pays": "SN", "Code du pays": "CN"},
+            {"Code pays": "国家编码"},
+        )
+        self.assertEqual("SN", row["国家编码"])
+        self.assertEqual("CN", row["Code du pays"])
 
     def test_empty_variants_returns_empty_map(self):
         self.assertEqual({}, reverse_map({}))

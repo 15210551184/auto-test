@@ -9,26 +9,17 @@
 import os
 import re
 import time
-import unicodedata
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 from urllib.parse import unquote, urlparse
 
 from . import normalize as N
-from .lang_variants import reverse_map as _reverse_variant_map
-
-
-_EXPORT_BUTTON_FALLBACK = (
-    "button:has-text('导出'), button:has-text('Export'), "
-    "button:has-text('Exporter'), button:has-text('تصدير')"
-)
+from . import lang_variants as LV
 
 
 def _export_buttons(ctx):
-    """配置选择器之外，始终保留多语言按钮文本兜底。"""
-    configured = (ctx.selector("export_btn") or "").strip()
-    selector = f"{configured}, {_EXPORT_BUTTON_FALLBACK}" if configured else _EXPORT_BUTTON_FALLBACK
-    return ctx.page.locator(selector)
+    """导出按钮定位由 Context 统一追加多语言兜底。"""
+    return ctx.page.locator(ctx.selector("export_btn"))
 
 
 def _configured_headers(ctx) -> List[str]:
@@ -44,35 +35,12 @@ def _configured_headers(ctx) -> List[str]:
     return []
 
 
-def _header_signature(value: str) -> str:
-    """消除大小写、重音及法语虚词，用于匹配轻微不同的翻译表头。"""
-    plain = unicodedata.normalize("NFKD", str(value or ""))
-    plain = "".join(ch for ch in plain if not unicodedata.combining(ch)).lower()
-    tokens = re.findall(r"[a-z0-9]+", plain)
-    stopwords = {"de", "du", "des", "la", "le", "les", "d", "l"}
-    return " ".join(token for token in tokens if token not in stopwords)
-
-
 def _runtime_header_map(ctx, explicit: Dict[str, str]) -> Dict[str, str]:
     """缺少 header_variants 时，按完整且等长的页面列顺序安全补全映射。"""
-    mapping = dict(explicit)
-    canonical = _configured_headers(ctx)
-    current = list(ctx.ui.headers(ctx.page))
-    if canonical and len(canonical) == len(current):
-        for translated, standard in zip(current, canonical):
-            mapping.setdefault(translated, standard)
+    mapping = LV.runtime_reverse_map(
+        {}, _configured_headers(ctx), list(ctx.ui.headers(ctx.page)))
+    mapping.update(explicit)
     return mapping
-
-
-def _canonical_header(value: str, mapping: Dict[str, str]) -> str:
-    if value in mapping:
-        return mapping[value]
-    signature = _header_signature(value)
-    if not signature:
-        return value
-    matches = {canonical for translated, canonical in mapping.items()
-               if _header_signature(translated) == signature}
-    return next(iter(matches)) if len(matches) == 1 else value
 
 
 def _phase(ctx, text: str) -> None:
@@ -357,10 +325,9 @@ def verify_export(ctx, compare_with=None, columns=None, row_count_mode="total",
     # columns 以及 capture 保存的页面数据使用 canonical（通常为中文）列名。
     # 两边先统一映射回 canonical，再进行缺列和字段值比较。
     header_variants = getattr(ctx.config, "header_variants", {}) or {}
-    canonical_of = _runtime_header_map(
-        ctx, _reverse_variant_map(header_variants))
+    canonical_of = _runtime_header_map(ctx, LV.reverse_map(header_variants))
     comparison_rows = [
-        {_canonical_header(key, canonical_of): value for key, value in row.items()}
+        LV.canonicalize_row(row, canonical_of)
         for row in rows
     ]
     _phase(ctx, f"导出：生成文件预览（{len(rows)} 行）")
@@ -382,8 +349,8 @@ def verify_export(ctx, compare_with=None, columns=None, row_count_mode="total",
         # columns 是生成/人工确认过的“可导出、可比较列”。配置存在时以它为准，
         # 不再强制要求头像、操作按钮等纯页面展示列也出现在 Excel 中。
         ui_headers = (list(columns) if columns else [
-            _canonical_header(h, canonical_of) for h in ctx.ui.headers(ctx.page)
-            if _canonical_header(h, canonical_of) not in ("操作", "序号", "")
+            LV.canonical_name(h, canonical_of) for h in ctx.ui.headers(ctx.page)
+            if LV.canonical_name(h, canonical_of) not in ("操作", "序号", "")
         ])
         xl_headers = list(comparison_rows[0].keys())
         missing = [h for h in ui_headers if h not in xl_headers]

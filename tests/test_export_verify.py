@@ -318,8 +318,10 @@ class ExportResponseDetectionTests(unittest.TestCase):
             self.headers = headers
 
     def test_export_button_fallback_covers_supported_languages(self):
+        from autotest.engine.i18n_terms import button_selector
+        selector = button_selector("export")
         for label in ("导出", "Export", "Exporter", "تصدير"):
-            self.assertIn(f":has-text('{label}')", EV._EXPORT_BUTTON_FALLBACK)
+            self.assertIn(f":has-text('{label}')", selector)
 
     def test_content_disposition_utf8_filename(self):
         response = self.FakeResponse(

@@ -21,31 +21,17 @@ from . import progress
 from .actions import (REGISTRY, AssertionFailed, AssertionWarning,
                       _infer_list_api_from_calls)
 from .login import LoginError, ensure_logged_in, is_login_page
+from .i18n_terms import button_selector as _button_selector
 from .adapters.element_ui import ElementUIAdapter
 from .models import Case, CaseResult, PageConfig, PageResult, Status, Step, StepResult
 from .state import save_storage_state, valid_storage_state
 
 DEFAULT_SELECTORS = {
     "table": ".el-table",
-    "search_btn": (
-        "button:has-text('搜索'), button:has-text('查询'), "
-        "button:has-text('Search'), button:has-text('Query'), "
-        "button:has-text('Rechercher'), button:has-text('بحث')"
-    ),
-    "reset_btn": (
-        "button:has-text('重置'), button:has-text('Reset'), "
-        "button:has-text('Réinitialiser'), button:has-text('إعادة تعيين')"
-    ),
-    "export_btn": (
-        "button:has-text('导出'), button:has-text('Export'), "
-        "button:has-text('Exporter'), button:has-text('تصدير')"
-    ),
-    "create_btn": (
-        "button:has-text('新增'), button:has-text('添加'), "
-        "button:has-text('Add'), button:has-text('Create'), button:has-text('New'), "
-        "button:has-text('Ajouter'), button:has-text('Créer'), "
-        "button:has-text('إضافة'), button:has-text('إنشاء')"
-    ),
+    "search_btn": _button_selector("search"),
+    "reset_btn": _button_selector("reset"),
+    "export_btn": _button_selector("export"),
+    "create_btn": _button_selector("create"),
     "submit_btn": ".el-dialog:visible .el-button--primary",
 }
 
@@ -240,7 +226,7 @@ class Context:
         """当前表头翻译回 canonical 列名，供 assert_headers 按 canonical 名字比对。"""
         raw = self.ui.headers(self.page)
         rmap = LV.reverse_map(self.config.header_variants)
-        return [rmap.get(h, h) for h in raw]
+        return [LV.canonical_name(h, rmap) for h in raw]
 
     def dialog_field_values(self) -> Dict[str, str]:
         """ctx.ui.dialog_field_values 的快捷方式，自动带上 header_variants。"""

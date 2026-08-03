@@ -37,3 +37,10 @@ def words(*categories: str) -> List[str]:
                 seen.add(w)
                 out.append(w)
     return out
+
+
+def button_selector(*categories: str) -> str:
+    """由统一词表生成 Playwright 按钮选择器，避免各动作重复维护翻译。"""
+    return ", ".join(
+        f"button:has-text('{text}')" for text in words(*categories)
+    )
