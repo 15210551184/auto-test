@@ -163,7 +163,13 @@ class RedetectListApiTests(unittest.TestCase):
 
         scanner.redetect_list_apis = fake_global
         logs = []
-        result = batch.redetect_all_list_apis("测试系统", on_log=logs.append)
+        events = []
+        original_emit = batch.progress.emit
+        batch.progress.emit = lambda **fields: events.append(fields)
+        try:
+            result = batch.redetect_all_list_apis("测试系统", on_log=logs.append)
+        finally:
+            batch.progress.emit = original_emit
 
         self.assertEqual(1, result["changed"])
         self.assertEqual(1, result["unchanged"])
@@ -177,6 +183,11 @@ class RedetectListApiTests(unittest.TestCase):
         self.assertEqual("/api/country/list", cached["report"]["list_api"])
         self.assertEqual(["国家名称"], cached["report"]["table"]["headers"])
         self.assertTrue(any("全局重探完成" in line for line in logs))
+        self.assertEqual(2, len(events[0]["tasks"]))
+        self.assertEqual(["waiting", "waiting"],
+                         [task["status"] for task in events[0]["tasks"]])
+        self.assertEqual(["passed", "passed"],
+                         [task["status"] for task in events[-1]["tasks"]])
 
 
 if __name__ == "__main__":

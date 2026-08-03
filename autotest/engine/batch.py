@@ -32,6 +32,7 @@ import yaml
 from playwright.sync_api import sync_playwright
 
 from . import browser as B
+from . import cancellation
 from . import progress
 from . import project as P
 from . import scanner
@@ -376,15 +377,34 @@ def redetect_all_list_apis(dir_name: str,
 
     counters = {"total": len(targets), "changed": 0, "unchanged": 0,
                 "no_candidate": 0, "failed": 0, "skipped": skipped}
+    task_states = {item["name"]: "waiting" for item in targets}
+
+    def emit_progress(index: int, name: Optional[str] = None) -> None:
+        progress.emit(
+            phase="redetect",
+            page=max(1, index),
+            pages=len(targets),
+            page_name=name,
+            tasks=[{"name": item["name"], "status": task_states[item["name"]]}
+                   for item in targets],
+        )
+
     _log(on_log, f"开始全局重新探测 {len(targets)} 个页面的列表接口（复用一个浏览器）")
+    # 任务开始前先把完整页面清单发给前端，状态栏一开始就显示 38/38，
+    # 而不是等哪个页面打印过日志才临时增加一个任务。
+    emit_progress(1)
 
     def on_page(index, total, name, stage, result):
         if stage == "running":
+            task_states[name] = "running"
+            emit_progress(index, name)
             _log(on_log, f"[{name}] 探测列表接口 {index}/{total} …")
             return
 
+        page_failed = False
         try:
             if result.get("error"):
+                page_failed = True
                 counters["failed"] += 1
                 _log(on_log, f"[{name}] 失败: {result['error']}")
             else:
@@ -407,10 +427,12 @@ def redetect_all_list_apis(dir_name: str,
                     counters["changed"] += 1
                     _log(on_log, f"[{name}] 已修正: {old} -> {new}")
         except Exception as exc:
+            page_failed = True
             counters["failed"] += 1
             _log(on_log, f"[{name}] 写回失败: {type(exc).__name__}: {exc}")
         finally:
-            progress.emit(phase="redetect", page=index, pages=total, page_name=name)
+            task_states[name] = "failed" if page_failed else "passed"
+            emit_progress(index, name)
 
     scanner.redetect_list_apis(
         targets,
@@ -519,6 +541,10 @@ def run_selected(dir_name: str, out_dir: str,
     def run_one(idx: int, name: str, cfg_path: Path) -> None:
         tag = f"[{name}]"
         with lock:
+            if cancellation.requested():
+                task_states[name] = "stopped"
+                emit_task_progress(name)
+                return
             task_states[name] = "running"
             emit_task_progress(name)
         # 只错峰第一批并发起步的 worker（idx < concurrency）——排在后面的
@@ -526,6 +552,11 @@ def run_selected(dir_name: str, out_dir: str,
         # 不需要再额外等。
         if idx < concurrency:
             time.sleep(idx * STAGGER_DELAY_SEC)
+        if cancellation.requested():
+            with lock:
+                task_states[name] = "stopped"
+                emit_task_progress(name)
+            return
         t0 = time.time()
         _log(on_log, f"\n{tag} 开始")
         try:
@@ -562,7 +593,12 @@ def run_selected(dir_name: str, out_dir: str,
 
             cases = filter_cases_by_tags(cfg.cases, only_tags, exclude_tags)
 
+            stopped_early = False
             for case_index, case in enumerate(cases, 1):
+                if cancellation.requested():
+                    stopped_early = True
+                    _log(on_log, f"{tag} · 已停止，不再执行后续用例")
+                    break
                 with lock:
                     emit_task_progress(name, case_index, len(cases))
                 case_started = time.monotonic()
@@ -573,7 +609,10 @@ def run_selected(dir_name: str, out_dir: str,
                                    done=case_done):
                     while not done.wait(RUN_HEARTBEAT_SEC):
                         elapsed = int(time.monotonic() - started)
-                        _log(on_log, f"{tag}    … {case_name} 仍在执行（{elapsed}s）")
+                        phase, phase_elapsed = ctx.phase_snapshot()
+                        _log(on_log,
+                             f"{tag}    … {case_name} 仍在执行（{elapsed}s）"
+                             f" · 当前阶段：{phase}（{phase_elapsed}s）")
 
                 heartbeat = threading.Thread(target=case_heartbeat, daemon=True)
                 heartbeat.start()
@@ -588,6 +627,10 @@ def run_selected(dir_name: str, out_dir: str,
                     if tail:
                         _log(on_log, f"{tag}    └ {tail[:160]}")
                 pr.cases.append(cr)
+                if cancellation.requested() and case_index < len(cases):
+                    stopped_early = True
+                    _log(on_log, f"{tag} · 当前用例已结束，正在生成部分报告")
+                    break
 
             pr.duration_ms = int((time.time() - t0) * 1000)
             _log(on_log, f"{tag} 小计：通过 {pr.passed} / 失败 {pr.failed}")
@@ -598,7 +641,11 @@ def run_selected(dir_name: str, out_dir: str,
             # 进度条右侧和任务状态面板都按“页面”统计。之前这里累加的是
             # 用例数，导致同一时刻上面显示通过 5、下面却显示通过 11。
             # 报告和最终日志仍保留用例级汇总，这里只统一实时页面进度口径。
-            _record_page_completion(counters, task_states, name, pr)
+            if stopped_early:
+                counters["done"] += 1
+                task_states[name] = "stopped"
+            else:
+                _record_page_completion(counters, task_states, name, pr)
             emit_task_progress(name)
 
     with ThreadPoolExecutor(max_workers=concurrency) as ex:
@@ -609,5 +656,8 @@ def run_selected(dir_name: str, out_dir: str,
     final_results = [r for r in results if r is not None]
     total_p = sum(r.passed for r in final_results)
     total_f = sum(r.failed for r in final_results)
-    _log(on_log, f"\n全部完成：{len(final_results)} 个页面，通过 {total_p} / 失败 {total_f}")
+    if cancellation.requested():
+        _log(on_log, f"\n执行已停止：已收集 {len(final_results)} 个页面，正在生成部分报告")
+    else:
+        _log(on_log, f"\n全部完成：{len(final_results)} 个页面，通过 {total_p} / 失败 {total_f}")
     return final_results

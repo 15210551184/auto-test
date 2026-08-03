@@ -41,6 +41,10 @@ class FakeCtx:
         self.shot_calls = []
         self.preview_calls = []
         self.api_log = []
+        self.phases = []
+
+    def set_phase(self, phase):
+        self.phases.append(phase)
 
     def shot(self, tag):
         self.shot_calls.append(tag)
@@ -185,6 +189,38 @@ class ExportDetailAttachmentTests(unittest.TestCase):
         self.assertNotIn("90000ms 内没拿到文件", message)
         self.assertIn("/api/export/country", message)
         self.assertIn("确认弹窗和文件响应", message)
+
+    def test_auto_export_shares_one_total_timeout_budget(self):
+        ctx = FakeCtx(self.tmp.name, ui_headers=["国家"], export_mode="auto")
+        ctx.config.export_task_api = "/api/export/tasks"
+        calls = []
+        clock = {"now": 100.0}
+        original_monotonic = EV.time.monotonic
+
+        def direct(current_ctx, timeout):
+            calls.append(("direct", timeout))
+            clock["now"] += 20
+            return None
+
+        def async_download(current_ctx, timeout):
+            calls.append(("async", timeout))
+            return None
+
+        EV._download_direct = direct
+        original_async = EV._download_async
+        EV._download_async = async_download
+        EV.time.monotonic = lambda: clock["now"]
+        try:
+            with self.assertRaises(AssertionFailed):
+                EV.verify_export(ctx, timeout=90000)
+        finally:
+            EV._download_async = original_async
+            EV.time.monotonic = original_monotonic
+
+        self.assertEqual(("direct", 20000), calls[0])
+        self.assertEqual("async", calls[1][0])
+        self.assertLessEqual(calls[1][1], 70000)
+        self.assertGreater(calls[1][1], 69000)
 
 
 class ExportResponseDetectionTests(unittest.TestCase):

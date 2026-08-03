@@ -16,6 +16,12 @@ from urllib.parse import unquote, urlparse
 from . import normalize as N
 
 
+def _phase(ctx, text: str) -> None:
+    setter = getattr(ctx, "set_phase", None)
+    if setter:
+        setter(text)
+
+
 def _read_table(path: str) -> List[Dict[str, Any]]:
     """读 xlsx / xls / csv，统一成 list[dict]"""
     import pandas as pd
@@ -103,6 +109,7 @@ def _download_direct(ctx, timeout: int) -> Optional[str]:
        本身就是 Excel/CSV，可在 requestfinished 后直接保存）。
     """
     page = ctx.page
+    _phase(ctx, f"导出：点击按钮并等待文件（最多 {max(1, timeout // 1000)}s）")
     downloads, responses = [], []
 
     def on_download(download):
@@ -179,7 +186,11 @@ def _download_async(ctx, timeout: int) -> Optional[str]:
         return None
     ctx.page.locator(ctx.selector("export_btn")).first.click()
     deadline = time.time() + timeout / 1000
+    poll = 0
     while time.time() < deadline:
+        poll += 1
+        left = max(0, int(deadline - time.time()))
+        _phase(ctx, f"导出：轮询异步任务（第 {poll} 次，剩余 {left}s）")
         ctx.page.wait_for_timeout(3000)
         try:
             resp = ctx.page.request.get(api)
@@ -229,6 +240,7 @@ def verify_export(ctx, compare_with=None, columns=None, row_count_mode="total",
 
     # 导出证据的第一张图：下载前的真实列表页。Context.shot 会在宽表场景
     # 临时扩大 viewport，确保横向滚动区里的列也进入同一张截图。
+    _phase(ctx, "导出：截取列表页完整列")
     list_image = ctx.shot("export_list_page")
     evidence_images = ([{"label": "列表页（完整列）", "path": list_image}]
                        if list_image else [])
@@ -236,6 +248,10 @@ def verify_export(ctx, compare_with=None, columns=None, row_count_mode="total",
     mode = ctx.config.export_mode
     path = None
     export_started = time.monotonic()
+    # timeout 是整次导出的总预算，不是每个下载策略各自的预算。以前 auto
+    # 会先等 direct 20s，再把完整 90s 给 async，单条用例实际可等 110s+，
+    # 页面看起来像卡死。现在无论走几种策略，总等待都不会超过配置值。
+    export_deadline = export_started + max(1, timeout) / 1000
     api_log_start = len(getattr(ctx, "api_log", None) or [])
     if mode in ("direct", "auto"):
         direct_timeout = timeout if mode == "direct" else min(timeout, 20000)
@@ -243,7 +259,9 @@ def verify_export(ctx, compare_with=None, columns=None, row_count_mode="total",
     if path is None and mode in ("async", "auto"):
         task_api = getattr(ctx.config, "export_task_api", None)
         if task_api:
-            path = _download_async(ctx, timeout)
+            remaining_ms = max(0, int((export_deadline - time.monotonic()) * 1000))
+            if remaining_ms:
+                path = _download_async(ctx, remaining_ms)
 
     if path is None:
         waited_ms = int((time.monotonic() - export_started) * 1000)
@@ -269,7 +287,9 @@ def verify_export(ctx, compare_with=None, columns=None, row_count_mode="total",
     if size == 0:
         raise AssertionFailed(f"导出文件为空: {path}")
 
+    _phase(ctx, f"导出：读取文件 {Path(path).name}")
     rows = _read_table(path)
+    _phase(ctx, f"导出：生成文件预览（{len(rows)} 行）")
     file_image = ctx.table_preview_shot(
         rows,
         "export_file_content",
@@ -281,6 +301,7 @@ def verify_export(ctx, compare_with=None, columns=None, row_count_mode="total",
         evidence_images.append({"label": "导出文件内容", "path": file_image})
     notes = [f"文件 {Path(path).name} ({size//1024}KB, {len(rows)} 行)"]
     problems = []
+    _phase(ctx, "导出：比对表头、行数和字段值")
 
     # --- 1. 表头一致性 ---
     if header_match and rows:

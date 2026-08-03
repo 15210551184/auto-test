@@ -11,6 +11,7 @@
 import argparse
 import json
 import os
+import signal
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -18,6 +19,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from engine import report as R
 from engine import scanner
 from engine import batch, project as P
+from engine import cancellation
 from engine import tz
 from engine.crawler import discover
 from engine.login import LoginError, load_dotenv
@@ -26,6 +28,19 @@ from engine.state import save_storage_state, valid_storage_state
 
 # runtime/.env 里的账号密码。cron 环境读不到 shell 的 export，所以必须走文件。
 load_dotenv("runtime/.env")
+
+
+def _enable_graceful_report_stop():
+    """SIGTERM/SIGINT 只请求停在安全边界，报告写完后再退出。"""
+    cancellation.reset()
+
+    def handle_stop(signum, frame):
+        if not cancellation.requested():
+            cancellation.request()
+            print("\n收到停止请求：当前用例结束后停止，并生成部分报告…", flush=True)
+
+    signal.signal(signal.SIGTERM, handle_stop)
+    signal.signal(signal.SIGINT, handle_stop)
 
 
 def _outdir(tag: str) -> str:
@@ -138,41 +153,45 @@ def cmd_batch_scan(a):
 
 def cmd_batch_run(a):
     """批量执行勾选的页面"""
+    _enable_graceful_report_stop()
     out = _outdir(P._safe(a.project))
     proj = P.load_project(a.project) or {}
     results = batch.run_selected(a.project, out, storage_state=a.state,
                                  only_tags=a.tags, exclude_tags=a.exclude_tags,
                                  concurrency=a.concurrency, target_language=a.lang)
-    path = R.render(results, os.path.join(out, "report.html"))
+    stopped = cancellation.requested()
+    path = R.render(results, os.path.join(out, "report.html"), stopped=stopped)
     R.render_json(results, os.path.join(out, "result.json"))
     lang_display = None
     if a.lang:
         lang_display = (proj.get("languages", {}).get("options", {}) or {}).get(a.lang, a.lang)
     R.render_meta(os.path.join(out, "meta.json"), project=proj.get("name", a.project),
                  page_count=len(results), only_tags=a.tags, exclude_tags=a.exclude_tags,
-                 language=a.lang, language_display=lang_display)
+                 language=a.lang, language_display=lang_display, stopped=stopped)
     print(f"报告: {os.path.abspath(path)}")
-    sys.exit(1 if sum(r.failed for r in results) else 0)
+    sys.exit(130 if stopped else (1 if sum(r.failed for r in results) else 0))
 
 
 def cmd_run(a):
+    _enable_graceful_report_stop()
     cfg = load_config(a.config)
     out = _outdir(os.path.basename(a.config).replace(".yaml", ""))
     print(f"执行 {cfg.name} ({len(cfg.cases)} 条用例)")
     res = run_page(cfg, out, headless=not a.headed, storage_state=a.state,
                    slow_mo=a.slow, only_tags=a.tags, exclude_tags=a.exclude_tags,
                    target_language=a.lang)
-    path = R.render([res], os.path.join(out, "report.html"))
+    stopped = cancellation.requested()
+    path = R.render([res], os.path.join(out, "report.html"), stopped=stopped)
     R.render_json([res], os.path.join(out, "result.json"))
     lang_display = None
     if a.lang:
         lang_display = (cfg.languages.get("options", {}) or {}).get(a.lang, a.lang)
     R.render_meta(os.path.join(out, "meta.json"), page_count=1,
                  only_tags=a.tags, exclude_tags=a.exclude_tags,
-                 language=a.lang, language_display=lang_display)
+                 language=a.lang, language_display=lang_display, stopped=stopped)
     print(f"\n通过 {res.passed} / 失败 {res.failed} / 共 {len(res.cases)}")
     print(f"报告: {os.path.abspath(path)}")
-    sys.exit(1 if res.failed else 0)
+    sys.exit(130 if stopped else (1 if res.failed else 0))
 
 
 def cmd_probe_lang(a):
@@ -214,7 +233,8 @@ def cmd_redetect_list_api(a):
     是最常见的"只有一个字段不对"场景，为了修它没必要连表单/表头/按钮/
     弹窗一起重扫一遍，那样既慢，还会把手工加的业务断言一起冲掉。"""
     try:
-        r = batch.redetect_list_api(a.project, a.page, storage_state=a.state, on_log=print)
+        # batch._log() 本身已经写 stdout；再传 print 会把每行重复输出一次。
+        r = batch.redetect_list_api(a.project, a.page, storage_state=a.state)
     except ValueError as e:
         print(f"✗ {e}")
         sys.exit(1)
@@ -228,7 +248,7 @@ def cmd_redetect_all_list_apis(a):
     """只批量修正项目中所有页面的 list_api，不覆盖已有用例。"""
     try:
         result = batch.redetect_all_list_apis(
-            a.project, storage_state=a.state, on_log=print)
+            a.project, storage_state=a.state)
     except ValueError as e:
         print(f"✗ {e}")
         sys.exit(1)

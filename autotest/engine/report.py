@@ -158,7 +158,7 @@ def _api_log_html(calls: list) -> str:
            + "".join(items) + "</details>")
 
 
-def render(results: List[PageResult], out_path: str) -> str:
+def render(results: List[PageResult], out_path: str, stopped: bool = False) -> str:
     total = sum(len(r.cases) for r in results)
     passed = sum(r.passed for r in results)         # 含 WARN：页面内容本身没问题就算通过
     failed = sum(r.failed for r in results)
@@ -169,6 +169,7 @@ def render(results: List[PageResult], out_path: str) -> str:
     parts = [f"""<!DOCTYPE html><html lang="zh-CN"><head><meta charset="utf-8">
 <title>自动化测试报告</title><style>{CSS}</style></head><body><div class="wrap">
 <h1>自动化数据验证报告</h1>
+{'<div class="partial">任务已由用户中途停止，本报告仅包含停止前已完成的数据。</div>' if stopped else ''}
 <div class="sub">{tz.now():%Y-%m-%d %H:%M:%S} · 耗时 {ms/1000:.1f}s</div>
 <div class="cards">
 <div class="card"><div class="n">{total}</div><div class="l">用例总数</div></div>
@@ -258,7 +259,8 @@ def build_run_label(page_count: int, only_tags: Optional[List[str]] = None,
 
 def render_meta(out_path: str, *, project: Optional[str] = None, page_count: int = 0,
                 only_tags: Optional[List[str]] = None, exclude_tags: Optional[List[str]] = None,
-                language: Optional[str] = None, language_display: Optional[str] = None) -> str:
+                language: Optional[str] = None, language_display: Optional[str] = None,
+                stopped: bool = False) -> str:
     """
     执行时的上下文（勾了哪些类别、选了哪种语言）单独存一份，不塞进
     result.json——那份文件的结构是"页面执行结果列表"，server.py 的
@@ -274,6 +276,7 @@ def render_meta(out_path: str, *, project: Optional[str] = None, page_count: int
         "language": language,
         "language_display": language_display,
         "label": build_run_label(page_count, only_tags, language_display),
+        "stopped": stopped,
     }
     with open(out_path, "w", encoding="utf-8") as f:
         json.dump(meta, f, ensure_ascii=False, indent=2)

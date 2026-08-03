@@ -14,6 +14,7 @@ import yaml
 from playwright.sync_api import sync_playwright, Page
 
 from . import browser as B
+from . import cancellation
 from . import lang_variants as LV
 from . import progress
 from .actions import (REGISTRY, AssertionFailed, AssertionWarning,
@@ -67,6 +68,10 @@ class Context:
         # 供报告里查"这条用例到底打了哪些接口、传了什么、返回了什么"。
         self.api_log: List[Dict[str, Any]] = []
         self._req_start: Dict[Any, float] = {}
+        # 批量执行的心跳从这里读取当前细分阶段。以前只能看到“某用例仍在
+        # 执行”，无法判断是在打开页面、等接口、等下载还是读 Excel。
+        self.current_phase = "初始化"
+        self.phase_started = time.monotonic()
         self.out_dir = out_dir
         # report_root：截图相对路径要相对谁计算——单页执行时 report.html 就写
         # 在 out_dir 里，两者相同；批量执行时每个页面各有自己的子目录
@@ -81,6 +86,13 @@ class Context:
         os.makedirs(self.shots_dir, exist_ok=True)
         self._shot_n = 0
         self._hook()
+
+    def set_phase(self, phase: str) -> None:
+        self.current_phase = phase
+        self.phase_started = time.monotonic()
+
+    def phase_snapshot(self):
+        return self.current_phase, max(0, int(time.monotonic() - self.phase_started))
 
     def _hook(self):
         self.page.on("console", lambda m: (
@@ -419,6 +431,14 @@ def run_step(ctx: Context, step: Step) -> StepResult:
         return StepResult(step.action, step.params, Status.ERROR,
                           f"未知动作 '{step.action}'，可用: {sorted(REGISTRY)}")
     try:
+        phase_names = {
+            "export_and_verify": "导出：准备下载与数据比对",
+            "search": "搜索：等待列表刷新",
+            "check_select_options": "筛选：逐项验证下拉选项",
+            "capture": "抓取页面表格数据",
+        }
+        if hasattr(ctx, "set_phase"):
+            ctx.set_phase(phase_names.get(step.action, f"执行步骤：{step.action}"))
         out = fn(ctx, **step.params)
         # 动作可以只返回一句消息，也可以返回 (消息, detail)——detail 是给
         # 报告页面的结构化附件（对比截图、下载链接），不是所有动作都有。
@@ -451,6 +471,8 @@ def run_case(ctx: Context, case: Case) -> CaseResult:
         return CaseResult(case.name, Status.SKIP)
 
     # 每条用例回到干净的页面状态，避免用例间互相污染
+    if hasattr(ctx, "set_phase"):
+        ctx.set_phase("打开并等待页面")
     ctx.reset_signals()
     ctx.suppress_search_evidence = any(
         step.action == "export_and_verify" for step in case.steps)
@@ -501,6 +523,8 @@ def run_case(ctx: Context, case: Case) -> CaseResult:
 
     if ctx.target_language:
         try:
+            if hasattr(ctx, "set_phase"):
+                ctx.set_phase("切换页面语言")
             REGISTRY["switch_language"](ctx, to=ctx.target_language)
         except Exception as e:
             return CaseResult(case.name, Status.ERROR, error=f"切换语言失败: {e}")
@@ -527,6 +551,8 @@ def run_case(ctx: Context, case: Case) -> CaseResult:
             if step.action == "delete_and_verify":
                 results.append(run_step(ctx, step))
 
+    if hasattr(ctx, "set_phase"):
+        ctx.set_phase("用例收尾")
     return CaseResult(case.name, status, results, int((time.time() - t0) * 1000),
                       api_calls=list(ctx.api_log))
 
@@ -571,6 +597,9 @@ def run_page(config: PageConfig, out_dir: str, headless: bool = True,
         cases = filter_cases_by_tags(config.cases, only_tags, exclude_tags)
 
         for ci, case in enumerate(cases, 1):
+            if cancellation.requested():
+                print("  · 已停止，不再执行后续用例", flush=True)
+                break
             print(f"  ▶ {case.name} ... ", end="", flush=True)
             cr = run_case(ctx, case)
             icon = {"pass": "✓", "warn": "⚠", "fail": "✗", "error": "!", "skip": "-"}[cr.status.value]
@@ -581,6 +610,9 @@ def run_page(config: PageConfig, out_dir: str, headless: bool = True,
             progress.emit(phase="run", page=1, pages=1, page_name=config.name,
                           case=ci, cases=len(cases),
                           passed=result.passed, failed=result.failed)
+            if cancellation.requested():
+                print("  · 当前用例已结束，正在生成部分报告", flush=True)
+                break
 
         browser.close()
 
