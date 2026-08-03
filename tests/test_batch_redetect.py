@@ -24,6 +24,25 @@ if "playwright.sync_api" not in sys.modules:
 
 import yaml
 from autotest.engine import batch, project, scanner
+from autotest.engine.models import CaseResult, PageResult, Status
+
+
+class BatchPageProgressTests(unittest.TestCase):
+    def test_progress_counts_pages_instead_of_cases(self):
+        counters = {"done": 0, "passed": 0, "failed": 0}
+        states = {"页面A": "running", "页面B": "running"}
+
+        passed_page = PageResult("页面A", "http://example.test")
+        passed_page.cases = [CaseResult(f"用例{i}", Status.PASS) for i in range(5)]
+        failed_page = PageResult("页面B", "http://example.test")
+        failed_page.cases = [CaseResult("通过用例", Status.PASS),
+                             CaseResult("失败用例", Status.FAIL)]
+
+        batch._record_page_completion(counters, states, "页面A", passed_page)
+        batch._record_page_completion(counters, states, "页面B", failed_page)
+
+        self.assertEqual({"done": 2, "passed": 1, "failed": 1}, counters)
+        self.assertEqual({"页面A": "passed", "页面B": "failed"}, states)
 
 
 class RedetectListApiTests(unittest.TestCase):
@@ -55,11 +74,13 @@ class RedetectListApiTests(unittest.TestCase):
                       "steps": [{"assert_row_count": {"min": 1}}]}],
         }), encoding="utf-8")
         self._orig_redetect = scanner.redetect_list_api
+        self._orig_redetect_all = scanner.redetect_list_apis
 
     def tearDown(self):
         project.PROJECTS_DIR = self.original_projects_dir
         self.tmp.cleanup()
         scanner.redetect_list_api = self._orig_redetect
+        scanner.redetect_list_apis = self._orig_redetect_all
 
     def test_patches_only_list_api_field(self):
         scanner.redetect_list_api = (
@@ -106,6 +127,56 @@ class RedetectListApiTests(unittest.TestCase):
     def test_unknown_project_raises(self):
         with self.assertRaises(ValueError):
             batch.redetect_list_api("不存在的系统", "国家管理")
+
+    def test_global_redetect_updates_all_configs_and_preserves_cases(self):
+        data = project.load_project("测试系统")
+        data["pages"].extend([
+            {"name": "城市管理", "url": "http://example.test/web/city", "selected": False},
+            {"name": "尚未生成", "url": "http://example.test/web/new", "selected": True},
+        ])
+        project.save_project(data)
+        city_path = project.page_config_path("测试系统", "城市管理")
+        city_path.write_text(yaml.dump({
+            "name": "城市管理",
+            "url": "http://example.test/web/city",
+            "list_api": "/api/city/list",
+            "cases": [{"name": "城市人工断言", "steps": [{"wait": 1}]}],
+        }), encoding="utf-8")
+        cache_path = project.scan_cache_path("测试系统", "国家管理")
+        cache_path.parent.mkdir(parents=True, exist_ok=True)
+        cache_path.write_text(json.dumps({
+            "version": batch.SCAN_CACHE_VERSION,
+            "report": {"list_api": "/api/vaWeb/system/notice/listTop",
+                       "table": {"headers": ["国家名称"]}},
+        }, ensure_ascii=False), encoding="utf-8")
+
+        def fake_global(pages, storage_state=None, login=None, on_page=None, **kw):
+            self.assertEqual(["国家管理", "城市管理"], [p["name"] for p in pages])
+            results = [
+                {"name": "国家管理", "api": "/api/country/list", "error": None},
+                {"name": "城市管理", "api": "/api/city/list", "error": None},
+            ]
+            for i, result in enumerate(results, 1):
+                on_page(i, 2, result["name"], "running", None)
+                on_page(i, 2, result["name"], "done", result)
+            return results
+
+        scanner.redetect_list_apis = fake_global
+        logs = []
+        result = batch.redetect_all_list_apis("测试系统", on_log=logs.append)
+
+        self.assertEqual(1, result["changed"])
+        self.assertEqual(1, result["unchanged"])
+        self.assertEqual(1, result["skipped"])
+        country = yaml.safe_load(self.cfg_path.read_text(encoding="utf-8"))
+        city = yaml.safe_load(city_path.read_text(encoding="utf-8"))
+        self.assertEqual("/api/country/list", country["list_api"])
+        self.assertEqual("手工加的断言", country["cases"][0]["name"])
+        self.assertEqual("城市人工断言", city["cases"][0]["name"])
+        cached = json.loads(cache_path.read_text(encoding="utf-8"))
+        self.assertEqual("/api/country/list", cached["report"]["list_api"])
+        self.assertEqual(["国家名称"], cached["report"]["table"]["headers"])
+        self.assertTrue(any("全局重探完成" in line for line in logs))
 
 
 if __name__ == "__main__":

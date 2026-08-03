@@ -224,6 +224,10 @@ class Job:
         return True
 
     def _emit(self, line: str):
+        # 普通日志带上实际发生时间，结构化进度和结束哨兵必须保持原样，
+        # 否则前端无法识别。空行也不加时间，避免日志里出现无意义时间行。
+        if line and not line.startswith("__PROGRESS__") and line != "__DONE__":
+            line = f"[{tz.now().strftime('%H:%M:%S')}] {line}"
         # 进度行只转发+留最新，不塞进日志缓冲（避免频繁进度把真实日志挤出 2000 行窗口）
         if not line.startswith("__PROGRESS__"):
             self.lines.append(line)
@@ -515,6 +519,15 @@ def api_run():
             return jsonify({"ok": False, "msg": "缺少页面名称"}), 400
         cmd = [PY, "cli.py", "redetect-list-api", d, page]
         name = f"重探接口 {d} · {page}"
+
+    elif action == "redetect-all-list-apis":
+        d = body.get("project", "")
+        if not d or "/" in d or "\\" in d:
+            return jsonify({"ok": False, "msg": "项目参数不合法"}), 400
+        if not P.load_project(d):
+            return jsonify({"ok": False, "msg": "项目不存在"}), 404
+        cmd = [PY, "cli.py", "redetect-all-list-apis", d]
+        name = f"全局重探接口 {d}"
 
     elif action == "scan":
         url = (body.get("url") or "").strip()

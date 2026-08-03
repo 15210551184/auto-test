@@ -47,6 +47,31 @@ class RuntimeTaskStatusTests(unittest.TestCase):
     def test_clicking_task_switches_to_its_log(self):
         self.assertIn("btn.onclick=()=>switchLogTab(btn.dataset.taskName)", INDEX_HTML)
 
+    def test_timestamped_logs_still_map_to_task(self):
+        self.assertIn("function logPayload(line)", INDEX_HTML)
+        self.assertIn("logPayload(line)", INDEX_HTML)
+
+    def test_sse_backlog_is_not_rendered_twice(self):
+        self.assertIn("let replay=logLines.__all__.slice(-300)", INDEX_HTML)
+        self.assertIn("if(l===replay[0]){replay.shift();return;}", INDEX_HTML)
+
+
+class GlobalListApiRedetectTests(unittest.TestCase):
+    def test_operation_panel_has_global_redetect_button(self):
+        self.assertIn('id="btnRedetectAll"', INDEX_HTML)
+        self.assertIn('>全局重探接口</button>', INDEX_HTML)
+
+    def test_global_button_starts_project_wide_job(self):
+        self.assertIn("trigger('redetect-all-list-apis')", INDEX_HTML)
+        self.assertIn("redetect:'重探接口'", INDEX_HTML)
+
+    def test_legacy_log_tab_row_is_removed(self):
+        self.assertNotIn('id="termTabs"', INDEX_HTML)
+        self.assertNotIn('class="term-tabs"', INDEX_HTML)
+
+    def test_total_tasks_returns_to_complete_log(self):
+        self.assertIn("if(activeTaskFilter==='all')switchLogTab('__all__')", INDEX_HTML)
+
 
 class ReportDownloadTests(unittest.TestCase):
     def test_history_report_has_download_link(self):

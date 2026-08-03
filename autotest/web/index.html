@@ -216,18 +216,6 @@ details.exec-opts[open]>summary{border-bottom:1px solid var(--line)}
 .task-item .dot.waiting{background:#5e6a7a}.task-item .dot.running{background:#7fb0ff;animation:pulse 1.1s infinite}
 .task-item .dot.passed{background:#4fce9b}.task-item .dot.failed{background:#ff7b85}
 .task-list-empty{font-size:11.5px;color:#5e6a7a;padding:3px 0}
-.term-tabs{display:flex;gap:6px;padding:8px 15px;overflow-x:auto;flex:0 0 auto;
-  border-bottom:1px solid #252c36;background:#171c24}
-.term-tabs::-webkit-scrollbar{height:5px}
-.term-tab{flex:0 0 auto;font-size:11.5px;padding:4px 10px;border-radius:12px;
-  border:1px solid #333c48;background:transparent;color:#9aa6b5;cursor:pointer;
-  white-space:nowrap;transition:background .12s}
-.term-tab:hover{background:#1c222b}
-.term-tab.active{background:#2f6fed;border-color:#2f6fed;color:#fff}
-.term-tab .dot{display:inline-block;width:6px;height:6px;border-radius:50%;margin-right:5px}
-.term-tab .dot.pass{background:#4fce9b}
-.term-tab .dot.fail{background:#ff7b85}
-.term-tab .dot.run{background:#7fb0ff;animation:pulse 1.1s infinite}
 .term{padding:12px 15px;height:300px;overflow-y:auto;font-size:12.5px;line-height:1.65;
   color:var(--term-fg);white-space:pre-wrap;word-break:break-all}
 .term::-webkit-scrollbar{width:9px}
@@ -355,7 +343,6 @@ header .logout:hover{color:var(--fail);background:#fff1f2}
         <div class="task-counts" id="taskCounts"></div>
         <div class="task-list" id="taskList"></div>
       </div>
-      <div class="term-tabs" id="termTabs" style="display:none"></div>
       <div class="term" id="term"><span class="empty">暂无运行记录。</span></div>
       <div class="term-foot">
         <label><input type="checkbox" id="autoscroll" checked> 自动滚动</label>
@@ -396,8 +383,9 @@ header .logout:hover{color:var(--fail);background:#fff1f2}
             <button class="soft-primary" id="btnGen">生成用例</button>
             <button id="btnRegen">重新生成 YAML</button>
             <button class="caution" id="btnRescan">重新扫描并生成</button>
+            <button id="btnRedetectAll" title="遍历全部已生成页面，只修正 list_api，不覆盖人工用例">全局重探接口</button>
           </div>
-          <div class="hint" title="重新生成 YAML 优先使用页面结构缓存；只有页面结构确实改变时才需要重新扫描。">重新生成走缓存；页面改版后再重新扫描</div>
+          <div class="hint" title="重新生成 YAML 优先使用页面结构缓存；全局重探只更新列表接口，不会覆盖人工编辑的用例。">重新生成走缓存；接口等待异常时可全局重探</div>
         </div>
         <div class="step">
           <div class="step-h">3 · 执行测试</div>
@@ -782,28 +770,29 @@ $('#yamlProbeLang').onclick=async()=>{
 };
 
 function lineClass(s){
-  if(s.indexOf('✓')>=0||/通过 \d/.test(s)) return 'l-pass';
-  if(s.indexOf('✗')>=0||s.indexOf('失败')>=0||s.indexOf('Error')>=0||s.indexOf('Traceback')>=0) return 'l-fail';
-  if(s.indexOf('⚠')>=0) return 'l-warn';
-  if(/^\s*[└·]/.test(s)) return 'l-dim';
-  if(/^\s*\[\d+\/\d+\]/.test(s)||s.indexOf('全部完成')>=0||s.indexOf('报告:')>=0||
-     s.indexOf('执行 ')===0||s.indexOf('扫描 ')===0||s.indexOf('发现 ')===0) return 'l-head';
-  if(s.indexOf('跳过')>=0) return 'l-warn';
+  const raw=logPayload(s);
+  if(raw.indexOf('✓')>=0||/通过 \d/.test(raw)) return 'l-pass';
+  if(raw.indexOf('✗')>=0||raw.indexOf('失败')>=0||raw.indexOf('Error')>=0||raw.indexOf('Traceback')>=0) return 'l-fail';
+  if(raw.indexOf('⚠')>=0) return 'l-warn';
+  if(/^\s*[└·…]/.test(raw)) return 'l-dim';
+  if(/^\s*\[\d+\/\d+\]/.test(raw)||raw.indexOf('全部完成')>=0||raw.indexOf('报告:')>=0||
+     raw.indexOf('执行 ')===0||raw.indexOf('扫描 ')===0||raw.indexOf('发现 ')===0) return 'l-head';
+  if(raw.indexOf('跳过')>=0) return 'l-warn';
   return '';
 }
-let logLines={__all__:[]},logTabOrder=[],logTabStatus={},activeLogTab='__all__';
+let logLines={__all__:[]},activeLogTab='__all__';
 let taskStates={},activeTaskFilter='all';
+function logPayload(line){return line.replace(/^\[\d{2}:\d{2}:\d{2}\]\s*/, '');}
 function logPageOf(line){
-  const m=/^\[([^\]]+)\]/.exec(line);
+  const m=/^\[([^\]]+)\]/.exec(logPayload(line));
   if(!m)return null;
   if(/^\d+\/\d+$/.test(m[1]))return null;   // [1/7] 这种是 scan_selected 的进度标记，不是页面名
   return m[1];
 }
 function resetLogs(){
-  logLines={__all__:[]};logTabOrder=[];logTabStatus={};activeLogTab='__all__';
+  logLines={__all__:[]};activeLogTab='__all__';
   taskStates={};activeTaskFilter='all';
   $('#taskStatus').style.display='none';
-  renderLogTabs();
 }
 function taskStatusLabel(st){return {waiting:'等待中',running:'执行中',passed:'已通过',failed:'失败'}[st]||st;}
 function renderTaskStatus(){
@@ -817,7 +806,11 @@ function renderTaskStatus(){
     '<button class="task-filter'+(activeTaskFilter===key?' active':'')+'" data-task-filter="'+key+'">'+
     label+' <b>'+counts[key]+'</b></button>').join('');
   $('#taskCounts').querySelectorAll('[data-task-filter]').forEach(btn=>{
-    btn.onclick=()=>{activeTaskFilter=btn.dataset.taskFilter;renderTaskStatus();};
+    btn.onclick=()=>{
+      activeTaskFilter=btn.dataset.taskFilter;
+      if(activeTaskFilter==='all')switchLogTab('__all__');
+      else renderTaskStatus();
+    };
   });
   const shown=names.filter(name=>{
     const st=taskStates[name];
@@ -838,23 +831,8 @@ function renderLine(s){
   if(c)d.className=c; d.textContent=s; term.appendChild(d);
   if($('#autoscroll').checked) term.scrollTop=term.scrollHeight;
 }
-function renderLogTabs(){
-  if(logTabOrder.length<1){$('#termTabs').style.display='none';return;}
-  $('#termTabs').style.display='flex';
-  let h='<button class="term-tab'+(activeLogTab==='__all__'?' active':'')+'" data-tab="__all__">全部</button>';
-  logTabOrder.forEach(p=>{
-    const st=logTabStatus[p]||'run';
-    h+='<button class="term-tab'+(activeLogTab===p?' active':'')+'" data-tab="'+esc(p)+'">'+
-       '<span class="dot '+st+'"></span>'+esc(p)+'</button>';
-  });
-  $('#termTabs').innerHTML=h;
-  $('#termTabs').querySelectorAll('[data-tab]').forEach(btn=>{
-    btn.onclick=()=>switchLogTab(btn.dataset.tab);
-  });
-}
 function switchLogTab(tab){
   activeLogTab=tab;
-  renderLogTabs();
   renderTaskStatus();
   term.innerHTML='';
   const lines=logLines[tab]||[];
@@ -866,7 +844,7 @@ function appendLine(s){
   logLines.__all__.push(s);
   const page=logPageOf(s);
   if(page){
-    if(!logLines[page]){logLines[page]=[];logTabOrder.push(page);logTabStatus[page]='run';}
+    if(!logLines[page])logLines[page]=[];
     if(!taskStates[page])taskStates[page]='running';
     logLines[page].push(s);
     // 执行阶段每页跑完会打"小计：通过 X / 失败 Y"，靠这行判断标签页该显示
@@ -875,10 +853,9 @@ function appendLine(s){
     // 但状态判断只认执行阶段那一种格式，导致扫描完的页面标签会一直转圈圈，
     // 永远停在"运行中"。这里补上扫描阶段自己的完成信号（生成成功/失败/跳过）。
     const m=/小计：通过\s*(\d+)\s*\/\s*失败\s*(\d+)/.exec(s);
-    if(m){logTabStatus[page]=(+m[2]>0)?'fail':'pass';taskStates[page]=(+m[2]>0)?'failed':'passed';}
-    else if(/生成 \d+ 条用例|已有配置，跳过|跳过（没有 URL）/.test(s)){logTabStatus[page]='pass';taskStates[page]='passed';}
-    else if(/^\[[^\]]+\]\s*失败[:：]/.test(s)){logTabStatus[page]='fail';taskStates[page]='failed';}
-    renderLogTabs();
+    if(m)taskStates[page]=(+m[2]>0)?'failed':'passed';
+    else if(/生成 \d+ 条用例|已有配置，跳过|跳过（没有 URL）/.test(s))taskStates[page]='passed';
+    else if(/^\[[^\]]+\]\s*失败[:：]/.test(logPayload(s)))taskStates[page]='failed';
     renderTaskStatus();
   }
   if(activeLogTab==='__all__'||activeLogTab===page) renderLine(s);
@@ -892,7 +869,7 @@ function applyProgress(p){
   }
   $('#termProg').style.display='block';
   const bar=$('#termProg').querySelector('.tp-bar'), fill=$('#tpFill');
-  const phase={scan:'扫描',run:'执行',menu:'扫描菜单'}[p.phase]||'执行';
+  const phase={scan:'扫描',run:'执行',menu:'扫描菜单',redetect:'重探接口'}[p.phase]||'执行';
   if(!p.pages){                       // 不定量阶段（如展开菜单树）：跑马灯
     bar.classList.add('indet');
     $('#tpLabel').textContent=phase+(p.page_name?' · '+p.page_name:'');
@@ -997,12 +974,13 @@ $('#btnDiscoverIncremental').onclick=()=>trigger('discover-incremental');
 $('#btnGen').onclick=()=>trigger('batch-scan');
 $('#btnRegen').onclick=()=>{if(confirm('将使用页面结构缓存重新生成并覆盖当前已勾选页面的 YAML，确定继续吗？'))trigger('batch-scan',true);};
 $('#btnRescan').onclick=()=>{if(confirm('这会重新打开浏览器扫描页面并覆盖 YAML，页面结构确实改变了吗？'))trigger('batch-scan',true,true);};
+$('#btnRedetectAll').onclick=()=>{if(confirm('将重新探测当前系统全部已生成页面的列表接口。\n只更新 list_api，不覆盖人工编辑的用例，确定继续吗？'))trigger('redetect-all-list-apis');};
 $('#btnRunSel').onclick=()=>trigger('batch-run');
 $('#btnStop').onclick=async()=>{const r=await post('/api/stop');
   toast(r.data.ok?'已发送终止信号':'当前没有运行中的任务',!r.data.ok);};
 $('#btnClear').onclick=()=>{term.innerHTML='<span class="empty">日志已清空。</span>';everStreamed=false;hideProgress();resetLogs();};
 function setBusy(b){
-  ['#btnDiscover','#btnDiscoverIncremental','#btnGen','#btnRegen','#btnRescan','#btnRunSel','#btnNewProj','#yamlProbeLang'].forEach(s=>$(s).disabled=b);
+  ['#btnDiscover','#btnDiscoverIncremental','#btnGen','#btnRegen','#btnRescan','#btnRedetectAll','#btnRunSel','#btnNewProj','#yamlProbeLang'].forEach(s=>$(s).disabled=b);
   $('#btnStop').disabled=!b;
   if(b) setState('busy','执行中');
 }
@@ -1022,8 +1000,15 @@ $('#npOk').onclick=async()=>{
   await loadProjects(r.data.dir);
 };
 function connect(){
+  // SSE 每次连接都会补发最近 300 行。页面刷新时 /api/status 已先恢复过
+  // 这些日志，这里逐行跳过同一批重放内容，避免“[页面] 开始”显示两遍。
+  let replay=logLines.__all__.slice(-300);
   const es=new EventSource('/api/stream');
   es.onmessage=e=>{const l=JSON.parse(e.data);
+    if(replay.length){
+      if(l===replay[0]){replay.shift();return;}
+      replay=[];
+    }
     if(typeof l==='string'&&l.startsWith(PROG_PREFIX)){
       applyProgressJSON(l.slice(PROG_PREFIX.length).trim());return;}
     if(l==='__DONE__'){finish();return;} appendLine(l);};

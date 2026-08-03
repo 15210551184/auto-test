@@ -224,6 +224,18 @@ def cmd_redetect_list_api(a):
         print(f"已更新: {r['old']} -> {r['new']}")
 
 
+def cmd_redetect_all_list_apis(a):
+    """只批量修正项目中所有页面的 list_api，不覆盖已有用例。"""
+    try:
+        result = batch.redetect_all_list_apis(
+            a.project, storage_state=a.state, on_log=print)
+    except ValueError as e:
+        print(f"✗ {e}")
+        sys.exit(1)
+    if result["failed"]:
+        sys.exit(1)
+
+
 def cmd_auto(a):
     print(f"扫描 {a.url} ...")
     rep = scanner.scan(a.url, storage_state=a.state, headless=True)
@@ -303,6 +315,13 @@ def main():
     s10.add_argument("project")
     s10.add_argument("page")
     s10.set_defaults(func=cmd_redetect_list_api)
+
+    s11 = sub.add_parser(
+        "redetect-all-list-apis",
+        help="重新探测项目全部已生成页面的列表接口，只更新 list_api",
+    )
+    s11.add_argument("project")
+    s11.set_defaults(func=cmd_redetect_all_list_apis)
 
     s5 = sub.add_parser("test-login", help="只验证账号密码能否登录")
     s5.add_argument("config")

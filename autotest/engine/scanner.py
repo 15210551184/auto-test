@@ -1075,6 +1075,63 @@ def redetect_list_api(url: str, storage_state: Optional[str] = None,
     return api
 
 
+def redetect_list_apis(pages: List[Dict[str, str]],
+                       storage_state: Optional[str] = None,
+                       headless: bool = True, wait: int = 3000,
+                       login: Optional[Dict[str, Any]] = None,
+                       on_page=None) -> List[Dict[str, Any]]:
+    """在同一个浏览器上下文里批量重新探测多个页面的 ``list_api``。
+
+    全局重探不能简单地循环 :func:`redetect_list_api`：那会为每个页面重新
+    启动 Chromium、重新校验登录，几十个页面既慢又可能触发并发登录限制。
+    这里复用一个浏览器上下文和 cookie，每页只新建一个 Page，页面之间不
+    共享监听器和候选请求。单页失败只记录错误，不中断后续页面。
+    """
+    items = [dict(item) for item in pages]
+    results: List[Dict[str, Any]] = []
+    with sync_playwright() as pw:
+        browser = B.launch(pw, headless=headless)
+        args = B.context_args()
+        state = valid_storage_state(storage_state)
+        if state:
+            args["storage_state"] = state
+        bctx = browser.new_context(**args)
+        try:
+            total = len(items)
+            for index, item in enumerate(items, 1):
+                name, url = item.get("name", ""), item.get("url", "")
+                if on_page:
+                    on_page(index, total, name, "running", None)
+                page = bctx.new_page()
+                result = {"name": name, "url": url, "api": None, "error": None}
+                try:
+                    sc = PageScanner(page)
+                    if login:
+                        did = ensure_logged_in(page, url, login)
+                        if did and storage_state:
+                            save_storage_state(bctx, storage_state)
+                    else:
+                        page.goto(url, wait_until="domcontentloaded", timeout=60000)
+                    page.set_default_timeout(5000)
+                    _wait_for_scan_ready(page, wait)
+                    table = sc.scan_table()
+                    result["api"] = sc.guess_list_api(
+                        sample_row=table.get("sample_row"))
+                except Exception as exc:
+                    result["error"] = f"{type(exc).__name__}: {exc}"
+                finally:
+                    try:
+                        page.close()
+                    except Exception:
+                        pass
+                results.append(result)
+                if on_page:
+                    on_page(index, total, name, "done", result)
+        finally:
+            browser.close()
+    return results
+
+
 # ---------- 生成配置 ----------
 
 def to_config(report: Dict[str, Any], name: Optional[str] = None,
