@@ -206,6 +206,7 @@ class Job:
         self.report_url = None
         self.progress = None           # 最近一条结构化进度（只留最新）
         self.proc = None
+        self.stop_requested = False
 
     def start(self, name: str, cmd: list) -> bool:
         with self.lock:
@@ -220,6 +221,7 @@ class Job:
             self.lines = []
             self.report_url = None
             self.progress = None
+            self.stop_requested = False
         threading.Thread(target=self._run, args=(cmd,), daemon=True).start()
         return True
 
@@ -268,8 +270,13 @@ class Job:
 
     def stop(self):
         if self.proc and self.running:
+            if self.stop_requested:
+                self.proc.kill()
+                self._emit("[已强制终止，可能无法生成部分报告]")
+                return True
+            self.stop_requested = True
             self.proc.terminate()
-            self._emit("[已手动终止]")
+            self._emit("[已请求停止，当前用例结束后将生成部分报告；再次点击可强制终止]")
             return True
         return False
 
@@ -282,6 +289,7 @@ class Job:
             "elapsed": round((self.finished or time.time()) - self.started, 1)
                        if self.started else 0,
             "returncode": self.returncode,
+            "stopped": self.stop_requested,
             "report_url": self.report_url,
             "progress": self.progress,
             "lines": self.lines[-500:],
@@ -320,7 +328,7 @@ def list_reports(limit=50):
         item = {"dir": d.name, "url": f"/reports/{d.name}/report.html",
                 "time": tz.from_ts(d.stat().st_mtime).strftime("%Y-%m-%d %H:%M"),
                 "passed": None, "failed": None, "total": None, "pages": [],
-                "label": None, "tags": [], "language_display": None}
+                "label": None, "tags": [], "language_display": None, "stopped": False}
         # meta.json 记的是执行时的上下文（勾了哪些类别、选了哪种语言）——
         # 老报告没有这个文件，读不到就是 None，前端退回只显示时间戳。
         mj = d / "meta.json"
@@ -330,6 +338,7 @@ def list_reports(limit=50):
                 item["label"] = meta.get("label")
                 item["tags"] = meta.get("tags") or []
                 item["language_display"] = meta.get("language_display")
+                item["stopped"] = bool(meta.get("stopped"))
             except Exception:
                 pass
         # 从 result.json 读汇总，读不到就只显示时间

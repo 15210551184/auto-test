@@ -55,6 +55,11 @@ class RuntimeTaskStatusTests(unittest.TestCase):
         self.assertIn("let replay=logLines.__all__.slice(-300)", INDEX_HTML)
         self.assertIn("if(l===replay[0]){replay.shift();return;}", INDEX_HTML)
 
+    def test_stopped_tasks_have_filter_and_force_stop_action(self):
+        self.assertIn("['stopped','已停止']", INDEX_HTML)
+        self.assertIn("$('#btnStop').textContent='强制终止'", INDEX_HTML)
+        self.assertIn("停止中 · 正在生成部分报告", INDEX_HTML)
+
 
 class GlobalListApiRedetectTests(unittest.TestCase):
     def test_operation_panel_has_global_redetect_button(self):

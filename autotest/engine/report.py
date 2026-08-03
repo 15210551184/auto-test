@@ -21,6 +21,8 @@ background:#f5f6f8;margin:0;padding:24px;color:#1f2329}
 .wrap{max-width:1100px;margin:0 auto}
 h1{font-size:20px;margin:0 0 4px}
 .sub{color:#8a9099;font-size:13px;margin-bottom:20px}
+.partial{margin:10px 0 16px;padding:10px 12px;border:1px solid #f0c36d;border-radius:6px;
+background:#fff8e8;color:#9a6700;font-size:13px}
 .cards{display:flex;gap:12px;margin-bottom:20px;flex-wrap:wrap}
 .card{background:#fff;border-radius:8px;padding:14px 20px;min-width:100px;
 border:1px solid #e6e8eb}
@@ -165,11 +167,13 @@ def render(results: List[PageResult], out_path: str, stopped: bool = False) -> s
     warned = sum(1 for r in results for c in r.cases if c.status == Status.WARN)
     skipped = total - passed - failed
     ms = sum(r.duration_ms for r in results)
+    partial_html = ('<div class="partial">任务已由用户中途停止，'
+                    '本报告仅包含停止前已完成的数据。</div>' if stopped else '')
 
     parts = [f"""<!DOCTYPE html><html lang="zh-CN"><head><meta charset="utf-8">
 <title>自动化测试报告</title><style>{CSS}</style></head><body><div class="wrap">
 <h1>自动化数据验证报告</h1>
-{'<div class="partial">任务已由用户中途停止，本报告仅包含停止前已完成的数据。</div>' if stopped else ''}
+{partial_html}
 <div class="sub">{tz.now():%Y-%m-%d %H:%M:%S} · 耗时 {ms/1000:.1f}s</div>
 <div class="cards">
 <div class="card"><div class="n">{total}</div><div class="l">用例总数</div></div>

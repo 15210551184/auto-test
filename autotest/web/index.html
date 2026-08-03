@@ -215,6 +215,7 @@ details.exec-opts[open]>summary{border-bottom:1px solid var(--line)}
 .task-item .dot{display:inline-block;width:6px;height:6px;border-radius:50%;margin-right:5px}
 .task-item .dot.waiting{background:#5e6a7a}.task-item .dot.running{background:#7fb0ff;animation:pulse 1.1s infinite}
 .task-item .dot.passed{background:#4fce9b}.task-item .dot.failed{background:#ff7b85}
+.task-item .dot.stopped{background:#f0b45e}
 .task-list-empty{font-size:11.5px;color:#5e6a7a;padding:3px 0}
 .term{padding:12px 15px;height:300px;overflow-y:auto;font-size:12.5px;line-height:1.65;
   color:var(--term-fg);white-space:pre-wrap;word-break:break-all}
@@ -794,14 +795,14 @@ function resetLogs(){
   taskStates={};activeTaskFilter='all';
   $('#taskStatus').style.display='none';
 }
-function taskStatusLabel(st){return {waiting:'等待中',running:'执行中',passed:'已通过',failed:'失败'}[st]||st;}
+function taskStatusLabel(st){return {waiting:'等待中',running:'执行中',passed:'已通过',failed:'失败',stopped:'已停止'}[st]||st;}
 function renderTaskStatus(){
   const names=Object.keys(taskStates);
   if(!names.length){$('#taskStatus').style.display='none';return;}
   $('#taskStatus').style.display='block';
-  const counts={all:names.length,waiting:0,running:0,completed:0,passed:0,failed:0};
-  names.forEach(n=>{const st=taskStates[n];if(counts[st]!=null)counts[st]++;if(st==='passed'||st==='failed')counts.completed++;});
-  const filters=[['all','总任务'],['completed','已完成'],['running','执行中'],['waiting','等待中'],['passed','通过'],['failed','失败']];
+  const counts={all:names.length,waiting:0,running:0,completed:0,passed:0,failed:0,stopped:0};
+  names.forEach(n=>{const st=taskStates[n];if(counts[st]!=null)counts[st]++;if(st==='passed'||st==='failed'||st==='stopped')counts.completed++;});
+  const filters=[['all','总任务'],['completed','已完成'],['running','执行中'],['waiting','等待中'],['passed','通过'],['failed','失败'],['stopped','已停止']];
   $('#taskCounts').innerHTML=filters.map(([key,label])=>
     '<button class="task-filter'+(activeTaskFilter===key?' active':'')+'" data-task-filter="'+key+'">'+
     label+' <b>'+counts[key]+'</b></button>').join('');
@@ -815,7 +816,7 @@ function renderTaskStatus(){
   const shown=names.filter(name=>{
     const st=taskStates[name];
     return activeTaskFilter==='all'||activeTaskFilter===st||
-      (activeTaskFilter==='completed'&&(st==='passed'||st==='failed'));
+      (activeTaskFilter==='completed'&&(st==='passed'||st==='failed'||st==='stopped'));
   });
   $('#taskList').innerHTML=shown.length?shown.map(name=>{
     const st=taskStates[name];
@@ -918,7 +919,8 @@ async function loadReports(){
     // label 是"5 个页面 · 冒烟+搜索筛选 · English"这种一句话摘要，跑批量/
     // 单页执行时才会写（见 cli.py 的 render_meta）；老报告没有这份 meta.json，
     // 退回只显示时间戳，不因为缺文件报错或者显示空白。
-    const heading = r.label ? esc(r.label) : r.time;
+    const heading = (r.stopped?'<span style="color:var(--warn)">[已停止]</span> ':'')+
+                    (r.label ? esc(r.label) : r.time);
     const subtime = r.label ? '<div class="rep-time-sub">'+r.time+'</div>' : '';
     h+='<div class="rep-item"><div class="rep-row1"><span class="rep-name" title="'+esc(r.label||r.time)+'">'+heading+'</span>'+
        '<div class="rep-actions"><a class="open" href="'+r.url+'" target="_blank">查看</a>'+
@@ -977,11 +979,13 @@ $('#btnRescan').onclick=()=>{if(confirm('这会重新打开浏览器扫描页面
 $('#btnRedetectAll').onclick=()=>{if(confirm('将重新探测当前系统全部已生成页面的列表接口。\n只更新 list_api，不覆盖人工编辑的用例，确定继续吗？'))trigger('redetect-all-list-apis');};
 $('#btnRunSel').onclick=()=>trigger('batch-run');
 $('#btnStop').onclick=async()=>{const r=await post('/api/stop');
-  toast(r.data.ok?'已发送终止信号':'当前没有运行中的任务',!r.data.ok);};
+  if(r.data.ok){$('#btnStop').textContent='强制终止';toast('已请求停止，正在完成当前用例并生成部分报告');}
+  else toast('当前没有运行中的任务',true);};
 $('#btnClear').onclick=()=>{term.innerHTML='<span class="empty">日志已清空。</span>';everStreamed=false;hideProgress();resetLogs();};
 function setBusy(b){
   ['#btnDiscover','#btnDiscoverIncremental','#btnGen','#btnRegen','#btnRescan','#btnRedetectAll','#btnRunSel','#btnNewProj','#yamlProbeLang'].forEach(s=>$(s).disabled=b);
   $('#btnStop').disabled=!b;
+  if(!b)$('#btnStop').textContent='终止';
   if(b) setState('busy','执行中');
 }
 $('#btnNewProj').onclick=()=>$('#mask').classList.add('show');
@@ -1016,8 +1020,8 @@ function connect(){
 }
 async function finish(){
   const st=await get('/api/status'); setBusy(false); hideProgress();
-  setState(st.returncode===0?'ok':'bad',
-    st.returncode===0?'完成 · '+st.elapsed+'s':'有失败 · '+st.elapsed+'s');
+  setState(st.stopped?'bad':(st.returncode===0?'ok':'bad'),
+    st.stopped?'已停止 · 部分报告已生成':(st.returncode===0?'完成 · '+st.elapsed+'s':'有失败 · '+st.elapsed+'s'));
   $('#elapsed').textContent='';
   await loadProjects(proj&&proj.dir);
   await loadReports();
@@ -1032,6 +1036,7 @@ async function poll(){
   const st=await get('/api/status');
   $('#jobName').textContent=st.name||'';
   if(st.running){setBusy(true);$('#elapsed').textContent=st.elapsed+'s';
+    if(st.stopped){setState('busy','停止中 · 正在生成部分报告');$('#btnStop').textContent='强制终止';}
     if(st.progress)applyProgressJSON(st.progress);}
   return st;
 }
