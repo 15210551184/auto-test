@@ -30,14 +30,16 @@ from engine.state import save_storage_state, valid_storage_state
 load_dotenv("runtime/.env")
 
 
-def _enable_graceful_report_stop():
-    """SIGTERM/SIGINT 只请求停在安全边界，报告写完后再退出。"""
+def _enable_graceful_report_stop(on_stop=None):
+    """收到停止信号后立即写部分报告并退出，不等待卡住的 worker。"""
     cancellation.reset()
 
     def handle_stop(signum, frame):
         if not cancellation.requested():
             cancellation.request()
-            print("\n收到停止请求：当前用例结束后停止，并生成部分报告…", flush=True)
+            print("\n收到停止请求：正在用已完成页面立即生成部分报告…", flush=True)
+            if on_stop:
+                on_stop()
 
     signal.signal(signal.SIGTERM, handle_stop)
     signal.signal(signal.SIGINT, handle_stop)
@@ -153,18 +155,31 @@ def cmd_batch_scan(a):
 
 def cmd_batch_run(a):
     """批量执行勾选的页面"""
-    _enable_graceful_report_stop()
     out = _outdir(P._safe(a.project))
     proj = P.load_project(a.project) or {}
+    lang_display = None
+    if a.lang:
+        lang_display = (proj.get("languages", {}).get("options", {}) or {}).get(a.lang, a.lang)
+
+    def write_partial_and_exit():
+        results = cancellation.partial_results_snapshot()
+        path = R.render(results, os.path.join(out, "report.html"), stopped=True)
+        R.render_json(results, os.path.join(out, "result.json"))
+        R.render_meta(
+            os.path.join(out, "meta.json"), project=proj.get("name", a.project),
+            page_count=len(results), only_tags=a.tags, exclude_tags=a.exclude_tags,
+            language=a.lang, language_display=lang_display, stopped=True)
+        print(f"部分报告已生成（{len(results)} 个已完成页面）", flush=True)
+        print(f"报告: {os.path.abspath(path)}", flush=True)
+        os._exit(130)
+
+    _enable_graceful_report_stop(write_partial_and_exit)
     results = batch.run_selected(a.project, out, storage_state=a.state,
                                  only_tags=a.tags, exclude_tags=a.exclude_tags,
                                  concurrency=a.concurrency, target_language=a.lang)
     stopped = cancellation.requested()
     path = R.render(results, os.path.join(out, "report.html"), stopped=stopped)
     R.render_json(results, os.path.join(out, "result.json"))
-    lang_display = None
-    if a.lang:
-        lang_display = (proj.get("languages", {}).get("options", {}) or {}).get(a.lang, a.lang)
     R.render_meta(os.path.join(out, "meta.json"), project=proj.get("name", a.project),
                  page_count=len(results), only_tags=a.tags, exclude_tags=a.exclude_tags,
                  language=a.lang, language_display=lang_display, stopped=stopped)
@@ -173,9 +188,24 @@ def cmd_batch_run(a):
 
 
 def cmd_run(a):
-    _enable_graceful_report_stop()
     cfg = load_config(a.config)
     out = _outdir(os.path.basename(a.config).replace(".yaml", ""))
+    lang_display = None
+    if a.lang:
+        lang_display = (cfg.languages.get("options", {}) or {}).get(a.lang, a.lang)
+
+    def write_empty_partial_and_exit():
+        path = R.render([], os.path.join(out, "report.html"), stopped=True)
+        R.render_json([], os.path.join(out, "result.json"))
+        R.render_meta(
+            os.path.join(out, "meta.json"), page_count=0,
+            only_tags=a.tags, exclude_tags=a.exclude_tags,
+            language=a.lang, language_display=lang_display, stopped=True)
+        print("部分报告已生成（当前页面尚未完成，未写入结果）", flush=True)
+        print(f"报告: {os.path.abspath(path)}", flush=True)
+        os._exit(130)
+
+    _enable_graceful_report_stop(write_empty_partial_and_exit)
     print(f"执行 {cfg.name} ({len(cfg.cases)} 条用例)")
     res = run_page(cfg, out, headless=not a.headed, storage_state=a.state,
                    slow_mo=a.slow, only_tags=a.tags, exclude_tags=a.exclude_tags,
@@ -183,9 +213,6 @@ def cmd_run(a):
     stopped = cancellation.requested()
     path = R.render([res], os.path.join(out, "report.html"), stopped=stopped)
     R.render_json([res], os.path.join(out, "result.json"))
-    lang_display = None
-    if a.lang:
-        lang_display = (cfg.languages.get("options", {}) or {}).get(a.lang, a.lang)
     R.render_meta(os.path.join(out, "meta.json"), page_count=1,
                  only_tags=a.tags, exclude_tags=a.exclude_tags,
                  language=a.lang, language_display=lang_display, stopped=stopped)

@@ -979,7 +979,7 @@ $('#btnRescan').onclick=()=>{if(confirm('这会重新打开浏览器扫描页面
 $('#btnRedetectAll').onclick=()=>{if(confirm('将重新探测当前系统全部已生成页面的列表接口。\n只更新 list_api，不覆盖人工编辑的用例，确定继续吗？'))trigger('redetect-all-list-apis');};
 $('#btnRunSel').onclick=()=>trigger('batch-run');
 $('#btnStop').onclick=async()=>{const r=await post('/api/stop');
-  if(r.data.ok){$('#btnStop').textContent='强制终止';toast('已请求停止，正在完成当前用例并生成部分报告');}
+  if(r.data.ok){$('#btnStop').textContent='强制终止';toast('已请求停止，正在立即生成部分报告');}
   else toast('当前没有运行中的任务',true);};
 $('#btnClear').onclick=()=>{term.innerHTML='<span class="empty">日志已清空。</span>';everStreamed=false;hideProgress();resetLogs();};
 function setBusy(b){

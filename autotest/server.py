@@ -13,6 +13,7 @@ import os
 import queue
 import re
 import secrets
+import signal
 import shutil
 import subprocess
 import sys
@@ -250,6 +251,7 @@ class Job:
                 cmd, cwd=str(ROOT), stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT, text=True, bufsize=1,
                 encoding="utf-8", errors="replace", env=env,
+                start_new_session=True,
             )
             for line in self.proc.stdout:
                 line = line.rstrip("\n")
@@ -264,6 +266,11 @@ class Job:
             self._emit(f"[执行异常] {e}")
             self.returncode = -1
         finally:
+            if self.stop_requested and self.proc:
+                try:
+                    os.killpg(self.proc.pid, signal.SIGKILL)
+                except (OSError, ProcessLookupError):
+                    pass
             self.finished = time.time()
             self.running = False
             self._emit("__DONE__")
@@ -271,12 +278,15 @@ class Job:
     def stop(self):
         if self.proc and self.running:
             if self.stop_requested:
-                self.proc.kill()
+                try:
+                    os.killpg(self.proc.pid, signal.SIGKILL)
+                except (OSError, ProcessLookupError):
+                    self.proc.kill()
                 self._emit("[已强制终止，可能无法生成部分报告]")
                 return True
             self.stop_requested = True
             self.proc.terminate()
-            self._emit("[已请求停止，当前用例结束后将生成部分报告；再次点击可强制终止]")
+            self._emit("[已请求停止，正在用已完成页面立即生成部分报告；再次点击可强制终止]")
             return True
         return False
 

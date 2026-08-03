@@ -38,6 +38,19 @@ class GracefulStopTests(unittest.TestCase):
             meta = json.loads(out.read_text(encoding="utf-8"))
         self.assertTrue(meta["stopped"])
 
+    def test_partial_snapshot_contains_only_published_completed_pages(self):
+        completed = PageResult("已完成页面", "http://example.test", [
+            CaseResult("完成用例", Status.PASS),
+        ])
+        still_running = PageResult("卡住页面", "http://example.test", [])
+        cancellation.reset_partial_results()
+        cancellation.publish_partial_result(completed)
+
+        snapshot = cancellation.partial_results_snapshot()
+
+        self.assertEqual(["已完成页面"], [item.name for item in snapshot])
+        self.assertNotIn(still_running, snapshot)
+
 
 if __name__ == "__main__":
     unittest.main()
