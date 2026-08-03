@@ -510,6 +510,8 @@ def api_run():
             cmd += ["--exclude-tags"] + body["exclude_tags"]
         if action == "batch-run" and body.get("lang"):
             cmd += ["--lang", body["lang"]]
+        if action == "batch-run" and body.get("all_languages"):
+            cmd.append("--all-languages")
         name = {"discover": f"扫描菜单 {d}",
                 "discover-incremental": f"增量扫描菜单 {d}",
                 "batch-scan": f"生成用例 {d}",

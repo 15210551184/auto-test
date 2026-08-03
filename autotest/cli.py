@@ -157,32 +157,59 @@ def cmd_batch_run(a):
     """批量执行勾选的页面"""
     out = _outdir(P._safe(a.project))
     proj = P.load_project(a.project) or {}
-    lang_display = None
+    languages = (proj.get("languages", {}).get("options", {}) or {})
+    if a.all_languages and a.lang:
+        raise ValueError("--lang 和 --all-languages 不能同时使用")
+    lang_display = f"全部语言（{len(languages)} 种）" if a.all_languages else None
     if a.lang:
         lang_display = (proj.get("languages", {}).get("options", {}) or {}).get(a.lang, a.lang)
 
+    completed_results = []
+
     def write_partial_and_exit():
-        results = cancellation.partial_results_snapshot()
+        results = completed_results + cancellation.partial_results_snapshot()
         path = R.render(results, os.path.join(out, "report.html"), stopped=True)
         R.render_json(results, os.path.join(out, "result.json"))
         R.render_meta(
             os.path.join(out, "meta.json"), project=proj.get("name", a.project),
             page_count=len(results), only_tags=a.tags, exclude_tags=a.exclude_tags,
-            language=a.lang, language_display=lang_display, stopped=True)
+            language="all" if a.all_languages else a.lang,
+            language_display=lang_display, stopped=True)
         print(f"部分报告已生成（{len(results)} 个已完成页面）", flush=True)
         print(f"报告: {os.path.abspath(path)}", flush=True)
         os._exit(130)
 
     _enable_graceful_report_stop(write_partial_and_exit)
-    results = batch.run_selected(a.project, out, storage_state=a.state,
-                                 only_tags=a.tags, exclude_tags=a.exclude_tags,
-                                 concurrency=a.concurrency, target_language=a.lang)
+    if a.all_languages:
+        if not languages:
+            raise ValueError("项目没有配置可执行语言")
+        results = []
+        for code, display in languages.items():
+            if cancellation.requested():
+                break
+            print(f"\n=== 执行语言：{display} ===", flush=True)
+            current = batch.run_selected(
+                a.project, out, storage_state=a.state,
+                only_tags=a.tags, exclude_tags=a.exclude_tags,
+                concurrency=a.concurrency, target_language=code,
+                artifact_namespace=f"lang_{P._safe(code)}",
+                result_name_suffix=display)
+            results.extend(current)
+            completed_results.extend(current)
+            # 当前语言已进入 completed_results；清掉批处理内部的快照，避免
+            # 此刻停止时同一语言在部分报告中出现两遍。
+            cancellation.reset_partial_results()
+    else:
+        results = batch.run_selected(a.project, out, storage_state=a.state,
+                                     only_tags=a.tags, exclude_tags=a.exclude_tags,
+                                     concurrency=a.concurrency, target_language=a.lang)
     stopped = cancellation.requested()
     path = R.render(results, os.path.join(out, "report.html"), stopped=stopped)
     R.render_json(results, os.path.join(out, "result.json"))
     R.render_meta(os.path.join(out, "meta.json"), project=proj.get("name", a.project),
                  page_count=len(results), only_tags=a.tags, exclude_tags=a.exclude_tags,
-                 language=a.lang, language_display=lang_display, stopped=stopped)
+                 language="all" if a.all_languages else a.lang,
+                 language_display=lang_display, stopped=stopped)
     print(f"报告: {os.path.abspath(path)}")
     sys.exit(130 if stopped else (1 if sum(r.failed for r in results) else 0))
 
@@ -351,6 +378,8 @@ def main():
     s8.add_argument("--concurrency", type=int, default=batch.DEFAULT_CONCURRENCY,
                     help=f"并发跑几个页面，默认 {batch.DEFAULT_CONCURRENCY}；开太多 Chromium 标签页吃内存，服务器紧张就别调大")
     s8.add_argument("--lang", help="执行前先切到指定语言（project.yaml 里 languages.options 的 code）")
+    s8.add_argument("--all-languages", action="store_true",
+                    help="按项目配置的每种语言分别执行，并汇总到同一份报告")
     s8.set_defaults(func=cmd_batch_run)
 
     s9 = sub.add_parser("probe-lang", help="探测语言切换菜单里的候选文案")

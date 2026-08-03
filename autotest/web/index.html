@@ -144,6 +144,25 @@ details.exec-opts[open]>summary{border-bottom:1px solid var(--line)}
 .exec-opts-body{padding:11px}
 .exec-opts-body .tag-filter{border:none;padding:0;background:none}
 .exec-opts-body .tag-filter+.tag-filter{margin-top:12px;padding-top:12px;border-top:1px solid var(--line)}
+.exec-section-head{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;margin-bottom:8px}
+.exec-section-title{font-size:12px;font-weight:700;color:var(--ink);line-height:1.35}
+.exec-section-note{font-size:11px;color:var(--ink-3);font-weight:400;margin-top:2px;line-height:1.45}
+.exec-lang-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;align-items:center}
+.exec-lang-row select{font-size:12.5px;padding:7px 30px 7px 9px}
+.exec-lang-state{font-size:10.5px;color:var(--busy-dark);background:var(--busy-soft);
+  border:1px solid #d8e3fb;border-radius:12px;padding:3px 8px;white-space:nowrap}
+.exec-presets{display:flex;gap:4px;flex-wrap:wrap;justify-content:flex-end}
+.exec-presets button{padding:4px 7px!important;font-size:10.5px!important;border-radius:12px}
+.exec-tag-grid{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+.exec-tag{display:grid!important;grid-template-columns:15px minmax(0,1fr);column-gap:7px;align-items:start;
+  padding:7px 8px;border:1px solid var(--line);border-radius:8px;background:#fff;cursor:pointer!important}
+.exec-tag:hover{border-color:#b9caf0;background:#f8faff}
+.exec-tag:has(input:checked){border-color:#9db8f3;background:var(--busy-soft);box-shadow:inset 2px 0 var(--busy)}
+.exec-tag input{margin-top:2px}
+.exec-tag strong{font-size:11.5px;color:var(--ink);font-weight:650;line-height:1.35}
+.exec-tag small{grid-column:2;font-size:10px;color:var(--ink-3);line-height:1.35;margin-top:1px}
+.exec-tag.risk:has(input:checked){border-color:#efcc8f;background:var(--warn-soft);box-shadow:inset 2px 0 var(--warn)}
+@media(max-width:440px){.exec-tag-grid{grid-template-columns:1fr}.exec-lang-row{grid-template-columns:1fr}}
 /* 右侧操作区保持紧凑：三个主步骤仍全部可见，但减少重复留白和控件高度。 */
 .ops-card .body{padding:11px 12px 12px}
 .ops-card .step{position:relative;padding:11px 12px;border:1px solid var(--line-soft);
@@ -398,29 +417,37 @@ header .logout:hover{color:var(--fail);background:#fff1f2}
             <summary>执行选项<span id="execOptsBadge"></span></summary>
             <div class="exec-opts-body">
               <div class="tag-filter" id="langFilter" style="display:none">
-                <div class="tf-title">
-                  执行语言<span class="tf-hint">（先选语言，再勾下面要跑的类别——除多语言检查外的用例都会先切到这门语言再跑，用来验证切换语言后功能是否还正常）</span>
+                <div class="exec-section-head">
+                  <div><div class="exec-section-title">执行语言</div>
+                    <div class="exec-section-note">普通用例先切换到所选语言；“多语言”用例仍会逐种语言检查。</div></div>
                 </div>
-                <div class="tf-list">
-                  <select id="langSelect" style="font-size:12.5px;padding:3px 6px">
+                <div class="exec-lang-row">
+                  <select id="langSelect">
                     <option value="">默认语言（不切换）</option>
                   </select>
+                  <span class="exec-lang-state" id="execLangState">保持默认</span>
                 </div>
               </div>
               <div class="tag-filter">
-                <div class="tf-title">
-                  只执行勾选的类别<span class="tf-hint">（生成时也会跳过未勾选的 CRUD/多语言深度扫描；都不选 = 全部）</span>
-                  <button class="link sm" type="button" id="btnTagAll" style="margin-left:auto">全选</button>
-                  <button class="link sm" type="button" id="btnTagNone">清空</button>
+                <div class="exec-section-head">
+                  <div><div class="exec-section-title">用例类别</div>
+                    <div class="exec-section-note">至少选择一类；生成和执行都会采用这里的范围。</div></div>
+                  <div class="exec-presets">
+                    <button type="button" id="btnTagNormal">常规</button>
+                    <button type="button" id="btnTagAll">全部</button>
+                    <button type="button" id="btnTagSmoke">仅冒烟</button>
+                    <button type="button" id="btnTagExport">仅导出</button>
+                    <button type="button" id="btnTagExportI18n">多语言导出</button>
+                  </div>
                 </div>
-                <div class="tf-list">
-                  <label><input type="checkbox" data-tagf value="smoke" checked> 冒烟</label>
-                  <label><input type="checkbox" data-tagf value="health" checked> 健康检查</label>
-                  <label><input type="checkbox" data-tagf value="search" checked> 搜索筛选</label>
-                  <label><input type="checkbox" data-tagf value="list" checked> 列表分页</label>
-                  <label><input type="checkbox" data-tagf value="export" checked> 导出</label>
-                  <label><input type="checkbox" data-tagf value="crud"> 新增/修改/删除</label>
-                  <label><input type="checkbox" data-tagf value="i18n"> 多语言</label>
+                <div class="exec-tag-grid">
+                  <label class="exec-tag"><input type="checkbox" data-tagf value="smoke" checked><strong>冒烟</strong><small>加载、表头、基础错误</small></label>
+                  <label class="exec-tag"><input type="checkbox" data-tagf value="health" checked><strong>健康检查</strong><small>按钮与详情页巡检</small></label>
+                  <label class="exec-tag"><input type="checkbox" data-tagf value="search" checked><strong>搜索筛选</strong><small>输入框和下拉筛选</small></label>
+                  <label class="exec-tag"><input type="checkbox" data-tagf value="list" checked><strong>列表分页</strong><small>行数与翻页加载</small></label>
+                  <label class="exec-tag"><input type="checkbox" data-tagf value="export" checked><strong>导出</strong><small>文件、表头及数据比对</small></label>
+                  <label class="exec-tag risk"><input type="checkbox" data-tagf value="crud"><strong>数据增删改</strong><small>会创建并清理测试数据</small></label>
+                  <label class="exec-tag"><input type="checkbox" data-tagf value="i18n"><strong>多语言</strong><small>逐种语言检查文案</small></label>
                 </div>
               </div>
             </div>
@@ -508,6 +535,7 @@ function renderLangFilter(){
   else{
     box.style.display='';
     sel.innerHTML='<option value="">默认语言（不切换）</option>'+
+      '<option value="__all__">全部配置语言（逐一执行）</option>'+
       codes.map(c=>'<option value="'+esc(c)+'">'+esc(options[c])+'</option>').join('');
   }
   updateExecOptsBadge();
@@ -542,10 +570,12 @@ $('#scanLangList').addEventListener('change',e=>{
 function updateExecOptsBadge(){
   const bits=[];
   const langSel=$('#langSelect');
-  if(langSel.value) bits.push(langSel.selectedOptions[0].textContent);
+  if(langSel.value) bits.push(langSel.value==='__all__'?'全部语言':langSel.selectedOptions[0].textContent);
   const tags=selectedTags();
-  if(tags.length) bits.push(tags.length+' 类');
-  $('#execOptsBadge').textContent=bits.length?'（'+bits.join(' · ')+'）':'';
+  bits.push(tags.length+'/7 类');
+  $('#execOptsBadge').textContent='（'+bits.join(' · ')+'）';
+  const state=$('#execLangState');
+  if(state) state.textContent=langSel.value==='__all__'?'逐种执行':(langSel.value?'切换后执行':'保持默认');
 }
 function _setMaxBtn(card,on){
   const btn=card.querySelector('.icon-btn');
@@ -945,9 +975,23 @@ async function loadReports(){
 function selectedTags(){
   return [...document.querySelectorAll('[data-tagf]:checked')].map(el=>el.value);
 }
-$('#btnTagAll').onclick=()=>{document.querySelectorAll('[data-tagf]').forEach(el=>el.checked=true);updateExecOptsBadge();};
-$('#btnTagNone').onclick=()=>{document.querySelectorAll('[data-tagf]').forEach(el=>el.checked=false);updateExecOptsBadge();};
-$('#execOpts').addEventListener('change',updateExecOptsBadge);
+function setSelectedTags(values){
+  const picked=new Set(values);
+  document.querySelectorAll('[data-tagf]').forEach(el=>el.checked=picked.has(el.value));
+  updateExecOptsBadge();
+}
+$('#btnTagNormal').onclick=()=>setSelectedTags(['smoke','health','search','list','export']);
+$('#btnTagAll').onclick=()=>setSelectedTags(['smoke','health','search','list','export','crud','i18n']);
+$('#btnTagSmoke').onclick=()=>setSelectedTags(['smoke']);
+$('#btnTagExport').onclick=()=>setSelectedTags(['export']);
+$('#btnTagExportI18n').onclick=()=>{$('#langSelect').value='__all__';setSelectedTags(['export']);};
+$('#execOpts').addEventListener('change',e=>{
+  if(e.target.matches('[data-tagf]')&&!selectedTags().length){
+    e.target.checked=true;
+    toast('至少保留一个用例类别',true);
+  }
+  updateExecOptsBadge();
+});
 async function trigger(action, overwrite=false, forceScan=false){
   if(!proj) return toast('请先选择或新建一个系统',true);
   const sel=pages.filter(p=>p.selected);
@@ -955,6 +999,8 @@ async function trigger(action, overwrite=false, forceScan=false){
     return toast('请先勾选要测试的菜单',true);
   if(action==='batch-run'&&!sel.some(p=>p.has_config))
     return toast('勾选的页面还没有用例，请先点「生成用例」',true);
+  if((action==='batch-scan'||action==='batch-run')&&!selectedTags().length)
+    return toast('请至少选择一个用例类别',true);
   const body={action:action,project:proj.dir,overwrite:overwrite};
   if(action==='batch-scan'){
     body.force_scan=forceScan;
@@ -963,9 +1009,10 @@ async function trigger(action, overwrite=false, forceScan=false){
   }
   if(action==='batch-run'){
     const tags=selectedTags();
-    if(tags.length) body.tags=tags;   // 都不选就不传 tags，后端默认跑全部
+    body.tags=tags;
     const lang=$('#langSelect').value;
-    if(lang) body.lang=lang;   // 不选就是默认语言，不切换
+    if(lang==='__all__') body.all_languages=true;
+    else if(lang) body.lang=lang;   // 不选就是默认语言，不切换
   }
   const r=await post('/api/run',body);
   if(!r.ok||!r.data.ok) return toast(r.data.msg||'启动失败',true);

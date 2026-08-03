@@ -33,6 +33,30 @@ class DefaultExecutionTagsTests(unittest.TestCase):
         self.assertNotIn('data-tagf value="crud" checked', INDEX_HTML)
         self.assertNotIn('data-tagf value="i18n" checked', INDEX_HTML)
 
+    def test_execution_presets_are_explicit_and_clear_is_removed(self):
+        for button_id in ("btnTagNormal", "btnTagAll", "btnTagSmoke",
+                          "btnTagExport", "btnTagExportI18n"):
+            self.assertIn(f'id="{button_id}"', INDEX_HTML)
+        self.assertNotIn('id="btnTagNone"', INDEX_HTML)
+        self.assertNotIn("都不选 = 全部", INDEX_HTML)
+
+    def test_zero_categories_are_rejected_before_execution(self):
+        self.assertIn("!selectedTags().length", INDEX_HTML)
+        self.assertIn("请至少选择一个用例类别", INDEX_HTML)
+        self.assertIn("至少保留一个用例类别", INDEX_HTML)
+
+    def test_categories_have_short_explanations_and_risk_marker(self):
+        self.assertIn("加载、表头、基础错误", INDEX_HTML)
+        self.assertIn("文件、表头及数据比对", INDEX_HTML)
+        self.assertIn('class="exec-tag risk"', INDEX_HTML)
+        self.assertIn("会创建并清理测试数据", INDEX_HTML)
+
+    def test_all_languages_and_export_presets_have_distinct_payloads(self):
+        self.assertIn('value="__all__">全部配置语言（逐一执行）', INDEX_HTML)
+        self.assertIn("$('#btnTagExport').onclick=()=>setSelectedTags(['export'])", INDEX_HTML)
+        self.assertIn("$('#btnTagExportI18n').onclick=()=>{", INDEX_HTML)
+        self.assertIn("body.all_languages=true", INDEX_HTML)
+
 
 class RuntimeTaskStatusTests(unittest.TestCase):
     def test_runtime_log_has_status_summary_and_task_list(self):

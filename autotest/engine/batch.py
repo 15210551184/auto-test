@@ -462,7 +462,9 @@ def run_selected(dir_name: str, out_dir: str,
                  exclude_tags: Optional[List[str]] = None,
                  on_log: Callable = None,
                  concurrency: int = DEFAULT_CONCURRENCY,
-                 target_language: Optional[str] = None) -> List[PageResult]:
+                 target_language: Optional[str] = None,
+                 artifact_namespace: Optional[str] = None,
+                 result_name_suffix: Optional[str] = None) -> List[PageResult]:
     """
     执行勾选的页面，最多 concurrency 个页面并发跑（见模块头部说明）。
 
@@ -480,7 +482,9 @@ def run_selected(dir_name: str, out_dir: str,
     for pg in pages:
         cfg_path = P.page_config_path(dir_name, pg["name"])
         if cfg_path.exists():
-            targets.append((pg["name"], cfg_path))
+            task_name = (f"{pg['name']} · {result_name_suffix}"
+                         if result_name_suffix else pg["name"])
+            targets.append((task_name, cfg_path))
         else:
             _log(on_log, f"  跳过 {pg['name']}（还没生成配置）")
 
@@ -588,13 +592,15 @@ def run_selected(dir_name: str, out_dir: str,
             worker_bctx.set_default_timeout(30000)
             page = worker_bctx.new_page()
 
-            page_out = os.path.join(out_dir, f"{idx + 1:02d}_{P._safe(name)}")
+            page_out = os.path.join(
+                out_dir, artifact_namespace or "", f"{idx + 1:02d}_{P._safe(name)}")
             os.makedirs(page_out, exist_ok=True)
             # report_root=out_dir：截图存在 page_out（每个页面自己的子目录）里，
             # 但汇总的 report.html 写在 out_dir 顶层——截图相对路径必须相对
             # report.html 的位置算，不然报告里的图全部裂掉（用户看不到失败截图）。
             ctx = Context(page, cfg, page_out, target_language=target_language, report_root=out_dir)
-            pr = PageResult(cfg.name, cfg.url)
+            result_name = f"{cfg.name} · {result_name_suffix}" if result_name_suffix else cfg.name
+            pr = PageResult(result_name, cfg.url)
 
             cases = filter_cases_by_tags(cfg.cases, only_tags, exclude_tags)
 
