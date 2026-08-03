@@ -148,6 +148,11 @@ class DetailRenderedInReportTests(unittest.TestCase):
             self.assertIn("screenshots/after.png", text)
             self.assertIn('id="lb"', text)   # 点击放大用的 lightbox 容器
             self.assertIn("toggleOnlyFail", text)
+            self.assertIn("filterCases('pass',this)", text)
+            self.assertIn("filterCases('skip',this)", text)
+            self.assertIn("filterCases('warn',this)", text)
+            self.assertIn("data-filter=\"all\"", text)
+            self.assertIn("status-pass", text)
 
     def test_export_failure_download_link_present(self):
         with tempfile.TemporaryDirectory() as d:
@@ -171,7 +176,7 @@ class DetailRenderedInReportTests(unittest.TestCase):
             render([PageResult("城市管理", "http://x.test", [case])], str(out))
             text = out.read_text(encoding="utf-8")
             self.assertIn('<details class="page" open><summary>城市管理', text)
-            self.assertIn('<details class="case"', text)   # 失败用例不带 "ok"，不会被过滤隐藏
+            self.assertIn('<details class="case status-fail"', text)
 
 
 class CollapsibleReportTests(unittest.TestCase):

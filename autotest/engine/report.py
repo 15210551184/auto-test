@@ -79,8 +79,7 @@ align-items:center;justify-content:center;cursor:zoom-out;padding:24px}
 .card.clickable:hover{border-color:#c0c6cd;background:#fbfcfd}
 .card.active{border-color:#0052d9;box-shadow:0 0 0 2px rgba(0,82,217,.12)}
 .filter-tip{font-size:12px;color:#8a9099;margin:-8px 0 14px}
-body.only-fail .case.ok{display:none}
-body.only-fail .page.nofail{display:none}
+.case.filtered-out,.page.filtered-out{display:none}
 .api-log{margin:8px 18px 12px;font-size:12px}
 .api-log>summary{cursor:pointer;color:#8a9099;list-style:none;padding:4px 0}
 .api-log>summary::-webkit-details-marker{display:none}
@@ -176,12 +175,12 @@ def render(results: List[PageResult], out_path: str, stopped: bool = False) -> s
 {partial_html}
 <div class="sub">{tz.now():%Y-%m-%d %H:%M:%S} · 耗时 {ms/1000:.1f}s</div>
 <div class="cards">
-<div class="card"><div class="n">{total}</div><div class="l">用例总数</div></div>
-<div class="card pass"><div class="n">{passed}</div><div class="l">通过</div></div>
-<div class="card fail clickable" id="failCard" onclick="toggleOnlyFail()">
+<div class="card clickable" data-filter="all" onclick="filterCases('all',this)"><div class="n">{total}</div><div class="l">用例总数</div></div>
+<div class="card pass clickable" data-filter="pass" onclick="filterCases('pass',this)"><div class="n">{passed}</div><div class="l">通过</div></div>
+<div class="card fail clickable" id="failCard" data-filter="fail" onclick="filterCases('fail',this)">
 <div class="n">{failed}</div><div class="l">失败</div></div>
-<div class="card skip"><div class="n">{skipped}</div><div class="l">跳过</div></div>
-<div class="card warn"><div class="n">{warned}</div><div class="l">其中有警告</div></div>
+<div class="card skip clickable" data-filter="skip" onclick="filterCases('skip',this)"><div class="n">{skipped}</div><div class="l">跳过</div></div>
+<div class="card warn clickable" data-filter="warn" onclick="filterCases('warn',this)"><div class="n">{warned}</div><div class="l">其中有警告</div></div>
 <div class="card"><div class="n">{(passed/total*100 if total else 0):.0f}%</div>
 <div class="l">通过率</div></div>
 </div>
@@ -189,7 +188,7 @@ def render(results: List[PageResult], out_path: str, stopped: bool = False) -> s
 <button type="button" onclick="document.querySelectorAll('details').forEach(d=>d.open=true)">全部展开</button>
 <button type="button" onclick="document.querySelectorAll('details').forEach(d=>d.open=false)">全部收起</button>
 </div>
-<div class="filter-tip">点上面「失败」卡片只看失败用例，再点一次恢复；截图点一下能放大。</div>"""]
+<div class="filter-tip">点击顶部统计卡片筛选对应用例；再次点击当前卡片或点击「用例总数」恢复全部。截图点一下能放大。</div>"""]
 
     for pr in results:
         page_cls = "page" if pr.failed else "page nofail"
@@ -198,7 +197,7 @@ def render(results: List[PageResult], out_path: str, stopped: bool = False) -> s
                      f'onclick="event.stopPropagation()">{html.escape(pr.url)}</a></summary>')
         for c in pr.cases:
             is_fail = c.status in (Status.FAIL, Status.ERROR)
-            case_cls = "case" if is_fail else "case ok"
+            case_cls = f"case status-{c.status.value}" + ("" if is_fail else " ok")
             openattr = " open" if is_fail else ""
             parts.append(f'<details class="{case_cls}"{openattr}><summary>{_badge(c.status)}'
                          f'<span>{html.escape(c.name)}</span>'
@@ -228,9 +227,27 @@ document.addEventListener('click', function(e){
   document.getElementById('lbImg').src = img.src;
   document.getElementById('lb').classList.add('on');
 });
+var activeFilter = 'all';
+function filterCases(filter, card){
+  if(filter === activeFilter && filter !== 'all') filter = 'all';
+  activeFilter = filter;
+  document.querySelectorAll('.cards .card.clickable').forEach(function(c){
+    c.classList.toggle('active', c.dataset.filter === filter && filter !== 'all');
+  });
+  document.querySelectorAll('.case').forEach(function(c){
+    var visible = filter === 'all' ||
+      (filter === 'pass' && (c.classList.contains('status-pass') || c.classList.contains('status-warn'))) ||
+      (filter === 'fail' && (c.classList.contains('status-fail') || c.classList.contains('status-error'))) ||
+      (filter === 'skip' && c.classList.contains('status-skip')) ||
+      (filter === 'warn' && c.classList.contains('status-warn'));
+    c.classList.toggle('filtered-out', !visible);
+  });
+  document.querySelectorAll('.page').forEach(function(p){
+    p.classList.toggle('filtered-out', !p.querySelector('.case:not(.filtered-out)'));
+  });
+}
 function toggleOnlyFail(){
-  document.body.classList.toggle('only-fail');
-  document.getElementById('failCard').classList.toggle('active');
+  filterCases('fail', document.getElementById('failCard'));
 }
 </script>
 </body></html>""")
