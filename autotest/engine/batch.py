@@ -543,7 +543,7 @@ def run_selected(dir_name: str, out_dir: str,
     # worker 尚未启动时先发一次 waiting 全量快照，状态栏无需等第一行页面日志。
     emit_task_progress()
 
-    def run_one(idx: int, name: str, cfg_path: Path) -> None:
+    def run_one(idx: int, name: str, cfg_path: Path, browser) -> None:
         tag = f"[{name}]"
         with lock:
             if cancellation.requested():
@@ -552,11 +552,6 @@ def run_selected(dir_name: str, out_dir: str,
                 return
             task_states[name] = "running"
             emit_task_progress(name)
-        # 只错峰第一批并发起步的 worker（idx < concurrency）——排在后面的
-        # worker 本来就要等前面某个 worker 跑完才轮到，天然已经错开了，
-        # 不需要再额外等。
-        if idx < concurrency:
-            time.sleep(idx * STAGGER_DELAY_SEC)
         if cancellation.requested():
             with lock:
                 task_states[name] = "stopped"
@@ -579,13 +574,12 @@ def run_selected(dir_name: str, out_dir: str,
                 emit_task_progress(name)
             return
 
-        # 每个 worker 线程独立起一个完整的 Playwright 会话（自己的 Chromium
-        # 进程），只共享上面登录拿到的 cookie（普通 dict，线程间只读安全）
-        with sync_playwright() as pw:
-            browser = B.launch(pw, headless=True)
-            worker_ctx_args = dict(base_ctx_args)
-            worker_ctx_args["storage_state"] = shared_state
-            worker_bctx = browser.new_context(**worker_ctx_args)
+        # browser 由浏览器池 worker 创建并复用；每个页面只新建隔离 Context，
+        # 保证 localStorage/监听器/下载互不污染，同时省掉反复启动 Chromium。
+        worker_ctx_args = dict(base_ctx_args)
+        worker_ctx_args["storage_state"] = shared_state
+        worker_bctx = browser.new_context(**worker_ctx_args)
+        try:
             worker_bctx.set_default_timeout(30000)
             page = worker_bctx.new_page()
 
@@ -642,9 +636,10 @@ def run_selected(dir_name: str, out_dir: str,
             pr.duration_ms = int((time.time() - t0) * 1000)
             _log(on_log, f"{tag} 小计：通过 {pr.passed} / 失败 {pr.failed}")
             results[idx] = pr
-            browser.close()
+        finally:
+            worker_bctx.close()
 
-        # browser 已关闭、PageResult 不会再变化，此时才允许停止处理器拿去写报告。
+        # 页面 Context 已关闭、PageResult 不会再变化，此时才允许停止处理器拿报告。
         cancellation.publish_partial_result(pr)
 
         with lock:
@@ -658,8 +653,27 @@ def run_selected(dir_name: str, out_dir: str,
                 _record_page_completion(counters, task_states, name, pr)
             emit_task_progress(name)
 
+    # 固定浏览器池：每个 worker 只启动一次 Playwright/Chromium，连续处理分配
+    # 给它的页面。默认 concurrency=1 时，整批几十个页面只启动一个执行浏览器。
+    groups = [[] for _ in range(concurrency)]
+    for i, (name, path) in enumerate(targets):
+        groups[i % concurrency].append((i, name, path))
+
+    def run_worker(worker_index: int, items) -> None:
+        if worker_index:
+            time.sleep(worker_index * STAGGER_DELAY_SEC)
+        with sync_playwright() as pw:
+            browser = B.launch(pw, headless=True)
+            try:
+                for idx, name, path in items:
+                    run_one(idx, name, path, browser)
+            finally:
+                browser.close()
+
+    _log(on_log, f"  · 浏览器池已启用：{len(groups)} 个 Chromium worker")
     with ThreadPoolExecutor(max_workers=concurrency) as ex:
-        futures = [ex.submit(run_one, i, name, path) for i, (name, path) in enumerate(targets)]
+        futures = [ex.submit(run_worker, i, group)
+                   for i, group in enumerate(groups) if group]
         for f in as_completed(futures):
             f.result()   # worker 内部没兜住的异常在这里重新抛出，不悄悄吞掉
 

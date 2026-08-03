@@ -14,6 +14,7 @@ from typing import Any, Dict, List, Optional
 from urllib.parse import unquote, urlparse
 
 from . import normalize as N
+from .lang_variants import reverse_map as _reverse_variant_map
 
 
 _EXPORT_BUTTON_FALLBACK = (
@@ -307,6 +308,15 @@ def verify_export(ctx, compare_with=None, columns=None, row_count_mode="total",
 
     _phase(ctx, f"导出：读取文件 {Path(path).name}")
     rows = _read_table(path)
+    # 页面和导出文件在英文/法文/阿文状态下使用的是翻译后表头，而 YAML 的
+    # columns 以及 capture 保存的页面数据使用 canonical（通常为中文）列名。
+    # 两边先统一映射回 canonical，再进行缺列和字段值比较。
+    header_variants = getattr(ctx.config, "header_variants", {}) or {}
+    canonical_of = _reverse_variant_map(header_variants)
+    comparison_rows = [
+        {canonical_of.get(key, key): value for key, value in row.items()}
+        for row in rows
+    ]
     _phase(ctx, f"导出：生成文件预览（{len(rows)} 行）")
     file_image = ctx.table_preview_shot(
         rows,
@@ -326,9 +336,10 @@ def verify_export(ctx, compare_with=None, columns=None, row_count_mode="total",
         # columns 是生成/人工确认过的“可导出、可比较列”。配置存在时以它为准，
         # 不再强制要求头像、操作按钮等纯页面展示列也出现在 Excel 中。
         ui_headers = (list(columns) if columns else [
-            h for h in ctx.ui.headers(ctx.page) if h not in ("操作", "序号", "")
+            canonical_of.get(h, h) for h in ctx.ui.headers(ctx.page)
+            if canonical_of.get(h, h) not in ("操作", "序号", "")
         ])
-        xl_headers = list(rows[0].keys())
+        xl_headers = list(comparison_rows[0].keys())
         missing = [h for h in ui_headers if h not in xl_headers]
         if missing:
             problems.append(f"导出缺少页面上的列: {missing}")
@@ -355,7 +366,7 @@ def verify_export(ctx, compare_with=None, columns=None, row_count_mode="total",
         for i, ui_row in enumerate(src[:sample]):
             if i >= len(rows):
                 break
-            xl_row = rows[i]
+            xl_row = comparison_rows[i]
             for col in columns:
                 if col not in ui_row or col not in xl_row:
                     skipped.add(col)

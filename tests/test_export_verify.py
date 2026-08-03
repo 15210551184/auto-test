@@ -32,11 +32,15 @@ class FakeUI:
 
 
 class FakeCtx:
-    def __init__(self, report_root, ui_headers, total=None, export_mode="direct"):
+    def __init__(self, report_root, ui_headers, total=None, export_mode="direct",
+                 header_variants=None):
         self.ui = FakeUI(ui_headers, total)
         self.page = None
         self.report_root = report_root
-        self.config = types.SimpleNamespace(export_mode=export_mode)
+        self.config = types.SimpleNamespace(
+            export_mode=export_mode,
+            header_variants=header_variants or {},
+        )
         self.data = {}
         self.shot_calls = []
         self.preview_calls = []
@@ -124,6 +128,37 @@ class ExportDetailAttachmentTests(unittest.TestCase):
         self.assertEqual("列表页（完整列）", detail["images"][0]["label"])
         self.assertEqual("导出文件内容", detail["images"][1]["label"])
         self.assertEqual(["export_list_page"], ctx.shot_calls)
+
+    def test_translated_headers_are_compared_by_canonical_name(self):
+        columns = ["国家编码", "国家名称", "状态"]
+        EV._read_table = lambda path: [{
+            "Code pays": "SN",
+            "Nom du pays": "Le Sénégal",
+            "Statut": "Actif",
+        }]
+        ctx = FakeCtx(
+            self.tmp.name,
+            ui_headers=["Code pays", "Nom du pays", "Statut"],
+            total=1,
+            header_variants={
+                "国家编码": {"fr": "Code pays"},
+                "国家名称": {"fr": "Nom du pays"},
+                "状态": {"fr": "Statut"},
+            },
+        )
+        ctx.data["page_data"] = [{
+            "国家编码": "SN",
+            "国家名称": "Le Sénégal",
+            "状态": "Actif",
+        }]
+
+        msg, _ = EV.verify_export(
+            ctx,
+            compare_with="page_data",
+            columns=columns,
+        )
+
+        self.assertIn("抽样比对 3 个字段一致", msg)
 
     def test_configured_columns_compare_values_beyond_first_five(self):
         # 页面第 7 个可比字段“加盟商”显示名称，而导出错误地写了内部 ID。
