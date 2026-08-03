@@ -385,9 +385,29 @@ def run_selected(dir_name: str, out_dir: str,
     results: List[Optional[PageResult]] = [None] * len(targets)
     lock = threading.Lock()
     counters = {"done": 0, "passed": 0, "failed": 0}
+    task_states = {name: "waiting" for name, _ in targets}
+
+    def emit_task_progress(current_name: Optional[str] = None) -> None:
+        """把每个页面的状态一起发给前端，刷新页面后也能恢复完整任务面板。"""
+        progress.emit(
+            phase="run",
+            page=max(1, counters["done"]),
+            pages=len(targets),
+            page_name=current_name,
+            passed=counters["passed"],
+            failed=counters["failed"],
+            tasks=[{"name": task_name, "status": task_states[task_name]}
+                   for task_name, _ in targets],
+        )
+
+    # worker 尚未启动时先发一次 waiting 全量快照，状态栏无需等第一行页面日志。
+    emit_task_progress()
 
     def run_one(idx: int, name: str, cfg_path: Path) -> None:
         tag = f"[{name}]"
+        with lock:
+            task_states[name] = "running"
+            emit_task_progress(name)
         # 只错峰第一批并发起步的 worker（idx < concurrency）——排在后面的
         # worker 本来就要等前面某个 worker 跑完才轮到，天然已经错开了，
         # 不需要再额外等。
@@ -405,8 +425,8 @@ def run_selected(dir_name: str, out_dir: str,
             with lock:
                 counters["done"] += 1
                 counters["failed"] += 1
-                progress.emit(phase="run", page=counters["done"], pages=len(targets),
-                              passed=counters["passed"], failed=counters["failed"])
+                task_states[name] = "failed"
+                emit_task_progress(name)
             return
 
         # 每个 worker 线程独立起一个完整的 Playwright 会话（自己的 Chromium
@@ -448,8 +468,8 @@ def run_selected(dir_name: str, out_dir: str,
             counters["done"] += 1
             counters["passed"] += pr.passed
             counters["failed"] += pr.failed
-            progress.emit(phase="run", page=counters["done"], pages=len(targets),
-                          passed=counters["passed"], failed=counters["failed"])
+            task_states[name] = "failed" if pr.failed else "passed"
+            emit_task_progress(name)
 
     with ThreadPoolExecutor(max_workers=concurrency) as ex:
         futures = [ex.submit(run_one, i, name, path) for i, (name, path) in enumerate(targets)]

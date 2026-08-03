@@ -34,5 +34,29 @@ class DefaultExecutionTagsTests(unittest.TestCase):
         self.assertNotIn('data-tagf value="i18n" checked', INDEX_HTML)
 
 
+class RuntimeTaskStatusTests(unittest.TestCase):
+    def test_runtime_log_has_status_summary_and_task_list(self):
+        self.assertIn('id="taskStatus"', INDEX_HTML)
+        self.assertIn('id="taskCounts"', INDEX_HTML)
+        self.assertIn('id="taskList"', INDEX_HTML)
+
+    def test_status_filters_cover_waiting_running_and_completed(self):
+        for key in ("completed", "running", "waiting", "passed", "failed"):
+            self.assertIn(f"['{key}'", INDEX_HTML)
+
+    def test_clicking_task_switches_to_its_log(self):
+        self.assertIn("btn.onclick=()=>switchLogTab(btn.dataset.taskName)", INDEX_HTML)
+
+
+class ReportDownloadTests(unittest.TestCase):
+    def test_history_report_has_download_link(self):
+        self.assertIn("/api/reports/'+encodeURIComponent(r.dir)+'/download", INDEX_HTML)
+        self.assertIn('>完整报告</a>', INDEX_HTML)
+
+    def test_history_report_has_abnormal_api_download_link(self):
+        self.assertIn("/api/reports/'+encodeURIComponent(r.dir)+'/download-errors", INDEX_HTML)
+        self.assertIn('>异常接口</a>', INDEX_HTML)
+
+
 if __name__ == "__main__":
     unittest.main()

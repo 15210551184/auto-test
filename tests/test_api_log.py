@@ -34,11 +34,13 @@ class FakePage:
 
 class FakeRequest:
     def __init__(self, method="GET", url="http://x.test/api/country/list?name=a",
-                headers=None, post_data=None):
+                headers=None, post_data=None, resource_type="xhr", failure=None):
         self.method = method
         self.url = url
         self.headers = headers or {}
         self.post_data = post_data
+        self.resource_type = resource_type
+        self.failure = failure
 
 
 class FakeApiResponse:
@@ -114,6 +116,23 @@ class ApiLogFilteringTests(unittest.TestCase):
             ctx.page.trigger("request", req)
             ctx.page.trigger("response", FakeApiResponse(req))
         self.assertEqual(_API_LOG_LIMIT, len(ctx.api_log))
+
+    def test_failed_xhr_is_logged_with_error_description(self):
+        ctx = _make_ctx()
+        req = FakeRequest(failure="net::ERR_CONNECTION_RESET")
+        ctx.page.trigger("request", req)
+        ctx.page.trigger("requestfailed", req)
+        self.assertEqual(1, len(ctx.api_log))
+        self.assertIsNone(ctx.api_log[0]["status"])
+        self.assertEqual("net::ERR_CONNECTION_RESET", ctx.api_log[0]["error"])
+
+    def test_failed_static_resource_is_not_added_to_api_log(self):
+        ctx = _make_ctx()
+        req = FakeRequest(url="http://x.test/logo.png", resource_type="image",
+                          failure="net::ERR_FAILED")
+        ctx.page.trigger("request", req)
+        ctx.page.trigger("requestfailed", req)
+        self.assertEqual([], ctx.api_log)
 
 
 class ApiLogResetTests(unittest.TestCase):

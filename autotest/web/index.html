@@ -201,6 +201,21 @@ details.exec-opts[open]>summary{border-bottom:1px solid var(--line)}
 .tp-bar.indet i{width:35%!important;transition:none;
   animation:indet 1.1s ease-in-out infinite}
 @keyframes indet{0%{margin-left:-35%}100%{margin-left:100%}}
+.task-status{padding:9px 15px;border-bottom:1px solid #252c36;background:#151a22;flex:0 0 auto}
+.task-counts{display:flex;gap:6px;overflow-x:auto;padding-bottom:7px}
+.task-filter{flex:0 0 auto;border:1px solid #333c48!important;background:transparent!important;
+  color:#9aa6b5!important;border-radius:12px!important;padding:3px 9px!important;font-size:11px!important}
+.task-filter.active{border-color:#2f6fed!important;background:#213252!important;color:#dce8ff!important}
+.task-filter b{font-weight:700;color:#fff;margin-left:3px}
+.task-list{display:flex;gap:6px;overflow-x:auto;padding-bottom:1px}
+.task-item{flex:0 0 auto;max-width:180px;border:1px solid #333c48!important;background:#1a2029!important;
+  color:#aab4c2!important;border-radius:6px!important;padding:4px 8px!important;font-size:11.5px!important;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.task-item.active{border-color:#7fb0ff!important;background:#24334b!important;color:#fff!important}
+.task-item .dot{display:inline-block;width:6px;height:6px;border-radius:50%;margin-right:5px}
+.task-item .dot.waiting{background:#5e6a7a}.task-item .dot.running{background:#7fb0ff;animation:pulse 1.1s infinite}
+.task-item .dot.passed{background:#4fce9b}.task-item .dot.failed{background:#ff7b85}
+.task-list-empty{font-size:11.5px;color:#5e6a7a;padding:3px 0}
 .term-tabs{display:flex;gap:6px;padding:8px 15px;overflow-x:auto;flex:0 0 auto;
   border-bottom:1px solid #252c36;background:#171c24}
 .term-tabs::-webkit-scrollbar{height:5px}
@@ -335,6 +350,10 @@ header .logout:hover{color:var(--fail);background:#fff1f2}
       <div class="term-prog" id="termProg" style="display:none">
         <div class="tp-text"><span id="tpLabel"></span><span id="tpCount"></span></div>
         <div class="tp-bar"><i id="tpFill"></i></div>
+      </div>
+      <div class="task-status" id="taskStatus" style="display:none">
+        <div class="task-counts" id="taskCounts"></div>
+        <div class="task-list" id="taskList"></div>
       </div>
       <div class="term-tabs" id="termTabs" style="display:none"></div>
       <div class="term" id="term"><span class="empty">暂无运行记录。</span></div>
@@ -773,6 +792,7 @@ function lineClass(s){
   return '';
 }
 let logLines={__all__:[]},logTabOrder=[],logTabStatus={},activeLogTab='__all__';
+let taskStates={},activeTaskFilter='all';
 function logPageOf(line){
   const m=/^\[([^\]]+)\]/.exec(line);
   if(!m)return null;
@@ -781,7 +801,37 @@ function logPageOf(line){
 }
 function resetLogs(){
   logLines={__all__:[]};logTabOrder=[];logTabStatus={};activeLogTab='__all__';
+  taskStates={};activeTaskFilter='all';
+  $('#taskStatus').style.display='none';
   renderLogTabs();
+}
+function taskStatusLabel(st){return {waiting:'等待中',running:'执行中',passed:'已通过',failed:'失败'}[st]||st;}
+function renderTaskStatus(){
+  const names=Object.keys(taskStates);
+  if(!names.length){$('#taskStatus').style.display='none';return;}
+  $('#taskStatus').style.display='block';
+  const counts={all:names.length,waiting:0,running:0,completed:0,passed:0,failed:0};
+  names.forEach(n=>{const st=taskStates[n];if(counts[st]!=null)counts[st]++;if(st==='passed'||st==='failed')counts.completed++;});
+  const filters=[['all','总任务'],['completed','已完成'],['running','执行中'],['waiting','等待中'],['passed','通过'],['failed','失败']];
+  $('#taskCounts').innerHTML=filters.map(([key,label])=>
+    '<button class="task-filter'+(activeTaskFilter===key?' active':'')+'" data-task-filter="'+key+'">'+
+    label+' <b>'+counts[key]+'</b></button>').join('');
+  $('#taskCounts').querySelectorAll('[data-task-filter]').forEach(btn=>{
+    btn.onclick=()=>{activeTaskFilter=btn.dataset.taskFilter;renderTaskStatus();};
+  });
+  const shown=names.filter(name=>{
+    const st=taskStates[name];
+    return activeTaskFilter==='all'||activeTaskFilter===st||
+      (activeTaskFilter==='completed'&&(st==='passed'||st==='failed'));
+  });
+  $('#taskList').innerHTML=shown.length?shown.map(name=>{
+    const st=taskStates[name];
+    return '<button class="task-item'+(activeLogTab===name?' active':'')+'" data-task-name="'+esc(name)+
+      '" title="'+esc(name)+' · '+taskStatusLabel(st)+'"><span class="dot '+st+'"></span>'+esc(name)+'</button>';
+  }).join(''):'<span class="task-list-empty">该状态下暂无任务</span>';
+  $('#taskList').querySelectorAll('[data-task-name]').forEach(btn=>{
+    btn.onclick=()=>switchLogTab(btn.dataset.taskName);
+  });
 }
 function renderLine(s){
   const d=document.createElement('div'),c=lineClass(s);
@@ -805,6 +855,7 @@ function renderLogTabs(){
 function switchLogTab(tab){
   activeLogTab=tab;
   renderLogTabs();
+  renderTaskStatus();
   term.innerHTML='';
   const lines=logLines[tab]||[];
   if(!lines.length){term.innerHTML='<span class="empty">暂无该页面日志。</span>';return;}
@@ -816,6 +867,7 @@ function appendLine(s){
   const page=logPageOf(s);
   if(page){
     if(!logLines[page]){logLines[page]=[];logTabOrder.push(page);logTabStatus[page]='run';}
+    if(!taskStates[page])taskStates[page]='running';
     logLines[page].push(s);
     // 执行阶段每页跑完会打"小计：通过 X / 失败 Y"，靠这行判断标签页该显示
     // 绿色还是红色。扫描阶段（生成用例）没有这行——之前扫描日志也套用了
@@ -823,16 +875,21 @@ function appendLine(s){
     // 但状态判断只认执行阶段那一种格式，导致扫描完的页面标签会一直转圈圈，
     // 永远停在"运行中"。这里补上扫描阶段自己的完成信号（生成成功/失败/跳过）。
     const m=/小计：通过\s*(\d+)\s*\/\s*失败\s*(\d+)/.exec(s);
-    if(m) logTabStatus[page]=(+m[2]>0)?'fail':'pass';
-    else if(/生成 \d+ 条用例|已有配置，跳过|跳过（没有 URL）/.test(s)) logTabStatus[page]='pass';
-    else if(/^\[[^\]]+\]\s*失败[:：]/.test(s)) logTabStatus[page]='fail';
+    if(m){logTabStatus[page]=(+m[2]>0)?'fail':'pass';taskStates[page]=(+m[2]>0)?'failed':'passed';}
+    else if(/生成 \d+ 条用例|已有配置，跳过|跳过（没有 URL）/.test(s)){logTabStatus[page]='pass';taskStates[page]='passed';}
+    else if(/^\[[^\]]+\]\s*失败[:：]/.test(s)){logTabStatus[page]='fail';taskStates[page]='failed';}
     renderLogTabs();
+    renderTaskStatus();
   }
   if(activeLogTab==='__all__'||activeLogTab===page) renderLine(s);
 }
 const PROG_PREFIX='__PROGRESS__';
 function applyProgress(p){
   if(!p)return;
+  if(Array.isArray(p.tasks)){
+    p.tasks.forEach(t=>{if(t&&t.name)taskStates[t.name]=t.status||'waiting';});
+    renderTaskStatus();
+  }
   $('#termProg').style.display='block';
   const bar=$('#termProg').querySelector('.tp-bar'), fill=$('#tpFill');
   const phase={scan:'扫描',run:'执行',menu:'扫描菜单'}[p.phase]||'执行';
@@ -888,6 +945,8 @@ async function loadReports(){
     const subtime = r.label ? '<div class="rep-time-sub">'+r.time+'</div>' : '';
     h+='<div class="rep-item"><div class="rep-row1"><span class="rep-name" title="'+esc(r.label||r.time)+'">'+heading+'</span>'+
        '<div class="rep-actions"><a class="open" href="'+r.url+'" target="_blank">查看</a>'+
+       '<a class="open" href="/api/reports/'+encodeURIComponent(r.dir)+'/download">完整报告</a>'+
+       '<a class="open" href="/api/reports/'+encodeURIComponent(r.dir)+'/download-errors">异常接口</a>'+
        '<button class="danger sm" type="button" data-rep-del="'+esc(r.dir)+'">删除</button></div></div>'+
        subtime+result+pageSummaryHtml(r.pages)+'</div>';
   });

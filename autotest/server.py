@@ -8,6 +8,7 @@ Web 控制台。
     而且多个任务同时操作同一套测试数据会互相干扰。
 """
 import json
+import io
 import os
 import queue
 import re
@@ -22,12 +23,14 @@ from pathlib import Path
 from urllib.parse import quote
 
 from flask import (Flask, Response, jsonify, redirect, render_template_string,
-                    request, send_from_directory, session)
+                    request, send_file, send_from_directory, session)
 
 from engine import project as P
 from engine import tz
+from engine.abnormal_api import render_abnormal_api_csv
 from engine.explain import explain_config
 from engine.login import load_dotenv
+from engine.report_archive import write_report_zip
 
 ROOT = Path(__file__).parent.resolve()
 CONFIG_DIR = ROOT / "configs"
@@ -378,6 +381,53 @@ def api_delete_report(dirname):
         return jsonify({"ok": False, "msg": "报告不存在"}), 404
     shutil.rmtree(d)
     return jsonify({"ok": True})
+
+
+@app.get("/api/reports/<dirname>/download")
+def api_download_report(dirname):
+    """下载完整报告包，保留 HTML、截图、导出附件和原始结果文件。"""
+    if "/" in dirname or "\\" in dirname or ".." in dirname:
+        return jsonify({"ok": False, "msg": "报告目录名不合法"}), 400
+    d = REPORT_DIR / dirname
+    if not d.is_dir() or not (d / "report.html").exists():
+        return jsonify({"ok": False, "msg": "报告不存在"}), 404
+
+    archive = io.BytesIO()
+    write_report_zip(d, dirname, archive)
+    archive.seek(0)
+    return send_file(
+        archive,
+        mimetype="application/zip",
+        as_attachment=True,
+        download_name=f"{dirname}.zip",
+        max_age=0,
+    )
+
+
+@app.get("/api/reports/<dirname>/download-errors")
+def api_download_report_errors(dirname):
+    """只下载异常接口及其接口/用例异常描述。"""
+    if "/" in dirname or "\\" in dirname or ".." in dirname:
+        return jsonify({"ok": False, "msg": "报告目录名不合法"}), 400
+    report_dir = REPORT_DIR / dirname
+    result_file = report_dir / "result.json"
+    if not report_dir.is_dir() or not (report_dir / "report.html").exists():
+        return jsonify({"ok": False, "msg": "报告不存在"}), 404
+    if not result_file.is_file():
+        return jsonify({"ok": False, "msg": "报告没有可下载的执行结果"}), 404
+    try:
+        results = json.loads(result_file.read_text(encoding="utf-8")) or []
+    except (OSError, ValueError):
+        return jsonify({"ok": False, "msg": "报告执行结果已损坏"}), 422
+
+    content = render_abnormal_api_csv(results)
+    return send_file(
+        io.BytesIO(content),
+        mimetype="text/csv; charset=utf-8",
+        as_attachment=True,
+        download_name=f"{dirname}-异常接口.csv",
+        max_age=0,
+    )
 
 
 @app.get("/api/status")

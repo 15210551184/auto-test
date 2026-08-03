@@ -99,7 +99,36 @@ class Context:
 
     def _on_request_failed(self, request):
         self.failed_requests.append(f"{request.method} {request.url[:120]}")
-        self._req_start.pop(request, None)   # 请求没等到响应，不留在字典里占地方
+        start = self._req_start.pop(request, None)  # 请求没等到响应，不留在字典里占地方
+        try:
+            is_api = request.resource_type in ("xhr", "fetch")
+        except Exception:
+            is_api = False
+        if not is_api or len(self.api_log) >= _API_LOG_LIMIT:
+            return
+        try:
+            headers = {k: ("[已隐藏]" if k.lower() in _REDACT_HEADERS else v)
+                       for k, v in request.headers.items()}
+        except Exception:
+            headers = {}
+        try:
+            post_data = request.post_data[:2000] if request.post_data else None
+        except Exception:
+            post_data = None
+        try:
+            failure = request.failure or "网络请求失败"
+        except Exception:
+            failure = "网络请求失败"
+        self.api_log.append({
+            "method": request.method,
+            "url": request.url[:500],
+            "status": None,
+            "duration_ms": int((time.time() - start) * 1000) if start else None,
+            "request_headers": headers,
+            "request_body": post_data,
+            "response_body": None,
+            "error": failure,
+        })
 
     def _on_api_response(self, resp):
         """接口调用记录：只挑 JSON 响应（业务接口的典型特征），静态资源

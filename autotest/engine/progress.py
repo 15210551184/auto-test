@@ -11,6 +11,7 @@ server.py 把子进程 stdout 逐行经 SSE 推给前端，前端识别这个前
   page_name  当前页面名
   case/cases 当前页内第几条 / 共几条用例
   passed/failed 累计通过 / 失败
+  tasks      页面任务列表：[{name, status}]，status 为 waiting/running/passed/failed
 """
 import json
 import sys
