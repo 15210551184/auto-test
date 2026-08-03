@@ -1,23 +1,20 @@
 """
 批量执行：一次跑一个项目里勾选的多个页面。
 
-关键决策：**所有 worker 复用同一份登录态，但各自起独立的浏览器进程并发跑**。
+关键决策：**固定大小的浏览器池复用登录态和 Chromium 进程**。
 之前每个配置单独 run_page 会各自启动浏览器、各自登录，10 个页面登 10 次；
 后来改成全部页面共用一个浏览器串行跑，登录只用 1 次，但页面之间完全排队，
 页面一多总耗时就很难看。
 
-现在的做法：先登录一次拿到 cookie（存成内存里的 dict），之后最多
-concurrency 个并发 worker 各自起一个完整的 sync_playwright() 会话（各自的
-Chromium 进程），加载同一份 cookie 跑不同页面——不是并发登录（很多系统会
-把老会话踢掉或触发风控），只是把已经建立好的会话复用到多个进程，跟同一
-账号在好几台设备上分别打开已登录的浏览器是一回事。
+现在的做法：先登录一次拿到 cookie（存成内存里的 dict），之后启动固定的
+concurrency 个 worker。每个 worker 只启动一次 Playwright/Chromium，并连续
+处理分配给它的多个页面；页面之间只重建轻量 BrowserContext 做状态隔离。
 
 **为什么每个 worker 要起独立浏览器进程，不能共用一个 browser 开多个 tab**：
 Playwright 的同步 API 不支持跨线程共享同一个 Playwright/Browser 实例——
 一个 sync_playwright() 上下文创建出的对象只能在创建它的那个线程里驱动，
-多线程各自调用同一个 browser 会出错。所以并发的代价是内存换成了"多开
-Chromium 进程"而不是"一个进程开多个 tab"，concurrency 调大之前务必确认
-服务器内存够用。
+多线程各自调用同一个 browser 会出错。所以池中每个线程仍有自己的 Chromium，
+但数量固定为 concurrency，而不再随着页面数量反复启动和退出。
 """
 import hashlib
 import json
@@ -89,6 +86,14 @@ def _record_page_completion(counters: Dict[str, int], task_states: Dict[str, str
     page_failed = bool(result.failed)
     counters["failed" if page_failed else "passed"] += 1
     task_states[name] = "failed" if page_failed else "passed"
+
+
+def _partition_targets(targets, workers: int):
+    """按 worker 数量轮询分组；每组由一个常驻 Chromium 顺序处理。"""
+    groups = [[] for _ in range(max(1, workers))]
+    for index, item in enumerate(targets):
+        groups[index % len(groups)].append((index, *item))
+    return [group for group in groups if group]
 
 
 def _scan_timeout_for(languages: Optional[Dict], base: int = SCAN_TIMEOUT_SEC) -> int:
@@ -655,9 +660,7 @@ def run_selected(dir_name: str, out_dir: str,
 
     # 固定浏览器池：每个 worker 只启动一次 Playwright/Chromium，连续处理分配
     # 给它的页面。默认 concurrency=1 时，整批几十个页面只启动一个执行浏览器。
-    groups = [[] for _ in range(concurrency)]
-    for i, (name, path) in enumerate(targets):
-        groups[i % concurrency].append((i, name, path))
+    groups = _partition_targets(targets, concurrency)
 
     def run_worker(worker_index: int, items) -> None:
         if worker_index:
