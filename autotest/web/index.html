@@ -151,8 +151,16 @@ details.exec-opts[open]>summary{border-bottom:1px solid var(--line)}
 .exec-lang-row select{font-size:12.5px;padding:7px 30px 7px 9px}
 .exec-lang-state{font-size:10.5px;color:var(--busy-dark);background:var(--busy-soft);
   border:1px solid #d8e3fb;border-radius:12px;padding:3px 8px;white-space:nowrap}
-.exec-presets{display:flex;gap:4px;flex-wrap:wrap;justify-content:flex-end}
-.exec-presets button{padding:4px 7px!important;font-size:10.5px!important;border-radius:12px}
+.exec-mode-select{font-size:12.5px;padding:7px 30px 7px 9px}
+.exec-custom{margin-top:10px;border:1px solid var(--line);border-radius:8px;background:#fff;overflow:hidden}
+.exec-custom>summary{cursor:pointer;list-style:none;padding:7px 9px;font-size:11.5px;color:var(--ink-2);
+  display:flex;align-items:center;gap:5px}
+.exec-custom>summary::-webkit-details-marker{display:none}
+.exec-custom>summary::before{content:'▸';color:var(--ink-3);font-size:10px}
+.exec-custom[open]>summary::before{transform:rotate(90deg)}
+.exec-custom[open]>summary{border-bottom:1px solid var(--line-soft)}
+.exec-custom-body{padding:7px}
+#customTagsBadge{margin-left:auto;color:var(--busy);font-size:10.5px}
 .exec-tag-grid{display:grid;grid-template-columns:1fr 1fr;gap:6px}
 .exec-tag{display:grid!important;grid-template-columns:15px minmax(0,1fr);column-gap:7px;align-items:start;
   padding:7px 8px;border:1px solid var(--line);border-radius:8px;background:#fff;cursor:pointer!important}
@@ -416,10 +424,23 @@ header .logout:hover{color:var(--fail);background:#fff1f2}
           <details class="exec-opts" id="execOpts">
             <summary>执行选项<span id="execOptsBadge"></span></summary>
             <div class="exec-opts-body">
+              <div class="tag-filter">
+                <div class="exec-section-head">
+                  <div><div class="exec-section-title">测试内容</div>
+                    <div class="exec-section-note">查询与导出可以单独验证，也可以一次同时验证。</div></div>
+                </div>
+                <select id="execPreset" class="exec-mode-select">
+                  <option value="search" selected>只测试查询</option>
+                  <option value="export">只测试导出</option>
+                  <option value="search_export">同时测试查询和导出</option>
+                  <option value="full">完整回归</option>
+                  <option value="custom">高级自定义</option>
+                </select>
+              </div>
               <div class="tag-filter" id="langFilter" style="display:none">
                 <div class="exec-section-head">
                   <div><div class="exec-section-title">执行语言</div>
-                    <div class="exec-section-note">普通用例先切换到所选语言；“多语言”用例仍会逐种语言检查。</div></div>
+                    <div class="exec-section-note">默认选择中文；也可以选择某一种语言或全部语言逐一执行。</div></div>
                 </div>
                 <div class="exec-lang-row">
                   <select id="langSelect">
@@ -431,24 +452,20 @@ header .logout:hover{color:var(--fail);background:#fff1f2}
               <div class="tag-filter">
                 <div class="exec-section-head">
                   <div><div class="exec-section-title">用例类别</div>
-                    <div class="exec-section-note">至少选择一类；生成和执行都会采用这里的范围。</div></div>
-                  <div class="exec-presets">
-                    <button type="button" id="btnTagNormal">常规</button>
-                    <button type="button" id="btnTagAll">全部</button>
-                    <button type="button" id="btnTagSmoke">仅冒烟</button>
-                    <button type="button" id="btnTagExport">仅导出</button>
-                    <button type="button" id="btnTagExportI18n">多语言导出</button>
-                  </div>
+                    <div class="exec-section-note">测试内容会自动选择类别，通常无需展开。</div></div>
                 </div>
-                <div class="exec-tag-grid">
-                  <label class="exec-tag"><input type="checkbox" data-tagf value="smoke" checked><strong>冒烟</strong><small>加载、表头、基础错误</small></label>
-                  <label class="exec-tag"><input type="checkbox" data-tagf value="health" checked><strong>健康检查</strong><small>按钮与详情页巡检</small></label>
-                  <label class="exec-tag"><input type="checkbox" data-tagf value="search" checked><strong>搜索筛选</strong><small>输入框和下拉筛选</small></label>
-                  <label class="exec-tag"><input type="checkbox" data-tagf value="list" checked><strong>列表分页</strong><small>行数与翻页加载</small></label>
-                  <label class="exec-tag"><input type="checkbox" data-tagf value="export" checked><strong>导出</strong><small>文件、表头及数据比对</small></label>
-                  <label class="exec-tag risk"><input type="checkbox" data-tagf value="crud"><strong>数据增删改</strong><small>会创建并清理测试数据</small></label>
-                  <label class="exec-tag"><input type="checkbox" data-tagf value="i18n"><strong>多语言</strong><small>逐种语言检查文案</small></label>
-                </div>
+                <details class="exec-custom" id="execCustom">
+                  <summary>高级自定义类别<span id="customTagsBadge">1/7</span></summary>
+                  <div class="exec-custom-body"><div class="exec-tag-grid">
+                    <label class="exec-tag"><input type="checkbox" data-tagf value="smoke"><strong>冒烟</strong><small>加载、表头、基础错误</small></label>
+                    <label class="exec-tag"><input type="checkbox" data-tagf value="health"><strong>健康检查</strong><small>按钮与详情页巡检</small></label>
+                    <label class="exec-tag"><input type="checkbox" data-tagf value="search" checked><strong>搜索筛选</strong><small>输入框和下拉筛选</small></label>
+                    <label class="exec-tag"><input type="checkbox" data-tagf value="list"><strong>列表分页</strong><small>行数与翻页加载</small></label>
+                    <label class="exec-tag"><input type="checkbox" data-tagf value="export"><strong>导出</strong><small>文件、表头及数据比对</small></label>
+                    <label class="exec-tag risk"><input type="checkbox" data-tagf value="crud"><strong>数据增删改</strong><small>会创建并清理测试数据</small></label>
+                    <label class="exec-tag"><input type="checkbox" data-tagf value="i18n"><strong>多语言</strong><small>逐种语言检查文案</small></label>
+                  </div></div>
+                </details>
               </div>
             </div>
           </details>
@@ -533,10 +550,14 @@ function renderLangFilter(){
   const codes=Object.keys(options);
   if(!codes.length){box.style.display='none';sel.innerHTML='<option value="">默认语言（不切换）</option>';}
   else{
+    const previous=sel.value;
+    const chinese=codes.find(c=>/简体中文|中文|chinese|zh[-_]?cn|^zh$/i.test(c+' '+options[c]))||'';
     box.style.display='';
-    sel.innerHTML='<option value="">默认语言（不切换）</option>'+
+    sel.innerHTML='<option value="">页面当前语言（不切换）</option>'+
       '<option value="__all__">全部配置语言（逐一执行）</option>'+
       codes.map(c=>'<option value="'+esc(c)+'">'+esc(options[c])+'</option>').join('');
+    sel.dataset.defaultLang=chinese;
+    sel.value=previous&&[...sel.options].some(o=>o.value===previous)?previous:chinese;
   }
   updateExecOptsBadge();
   renderScanLangFilter();
@@ -570,10 +591,13 @@ $('#scanLangList').addEventListener('change',e=>{
 function updateExecOptsBadge(){
   const bits=[];
   const langSel=$('#langSelect');
+  const preset=$('#execPreset');
+  if(preset) bits.push(preset.selectedOptions[0].textContent);
   if(langSel.value) bits.push(langSel.value==='__all__'?'全部语言':langSel.selectedOptions[0].textContent);
   const tags=selectedTags();
-  bits.push(tags.length+'/7 类');
   $('#execOptsBadge').textContent='（'+bits.join(' · ')+'）';
+  const customBadge=$('#customTagsBadge');
+  if(customBadge) customBadge.textContent=tags.length+'/7';
   const state=$('#execLangState');
   if(state) state.textContent=langSel.value==='__all__'?'逐种执行':(langSel.value?'切换后执行':'保持默认');
 }
@@ -980,16 +1004,23 @@ function setSelectedTags(values){
   document.querySelectorAll('[data-tagf]').forEach(el=>el.checked=picked.has(el.value));
   updateExecOptsBadge();
 }
-$('#btnTagNormal').onclick=()=>setSelectedTags(['smoke','health','search','list','export']);
-$('#btnTagAll').onclick=()=>setSelectedTags(['smoke','health','search','list','export','crud','i18n']);
-$('#btnTagSmoke').onclick=()=>setSelectedTags(['smoke']);
-$('#btnTagExport').onclick=()=>setSelectedTags(['export']);
-$('#btnTagExportI18n').onclick=()=>{$('#langSelect').value='__all__';setSelectedTags(['export']);};
+const EXEC_PRESETS={
+  search:['search'],
+  export:['export'],
+  search_export:['search','export'],
+  full:['smoke','health','search','list','export','crud','i18n']
+};
+function applyExecPreset(mode){
+  if(mode==='custom')return updateExecOptsBadge();
+  setSelectedTags(EXEC_PRESETS[mode]||EXEC_PRESETS.search);
+}
+$('#execPreset').onchange=()=>applyExecPreset($('#execPreset').value);
 $('#execOpts').addEventListener('change',e=>{
   if(e.target.matches('[data-tagf]')&&!selectedTags().length){
     e.target.checked=true;
     toast('至少保留一个用例类别',true);
   }
+  if(e.target.matches('[data-tagf]'))$('#execPreset').value='custom';
   updateExecOptsBadge();
 });
 async function trigger(action, overwrite=false, forceScan=false){

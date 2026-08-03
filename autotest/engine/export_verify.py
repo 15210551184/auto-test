@@ -43,6 +43,37 @@ def _runtime_header_map(ctx, explicit: Dict[str, str]) -> Dict[str, str]:
     return mapping
 
 
+def _augment_header_map_by_values(rows: List[Dict[str, Any]],
+                                  source: Optional[List[Dict[str, Any]]],
+                                  columns: Optional[List[str]],
+                                  mapping: Dict[str, str],
+                                  sample: int = 20) -> Dict[str, str]:
+    """用实际列值唯一匹配表头译法不同的字段；有歧义时不猜。"""
+    if not rows or not source or not columns:
+        return mapping
+    out = dict(mapping)
+    mapped_rows = [LV.canonicalize_row(row, out) for row in rows]
+    present = set(mapped_rows[0]) if mapped_rows else set()
+    candidates = [column for column in columns if column not in present]
+    for raw_header in rows[0]:
+        if raw_header in out or LV.canonical_name(raw_header, out) != raw_header:
+            continue
+        matches = []
+        for column in candidates:
+            pairs = []
+            for index, ui_row in enumerate(source[:sample]):
+                if index >= len(rows) or column not in ui_row or raw_header not in rows[index]:
+                    break
+                pairs.append((ui_row[column], rows[index][raw_header]))
+            if pairs and any(N.text(a) or N.text(b) for a, b in pairs) \
+                    and all(N.compare(a, b) for a, b in pairs):
+                matches.append(column)
+        if len(matches) == 1:
+            out[raw_header] = matches[0]
+            candidates.remove(matches[0])
+    return out
+
+
 def _phase(ctx, text: str) -> None:
     setter = getattr(ctx, "set_phase", None)
     if setter:
@@ -326,6 +357,9 @@ def verify_export(ctx, compare_with=None, columns=None, row_count_mode="total",
     # 两边先统一映射回 canonical，再进行缺列和字段值比较。
     header_variants = getattr(ctx.config, "header_variants", {}) or {}
     canonical_of = _runtime_header_map(ctx, LV.reverse_map(header_variants))
+    src = ctx.data.get(compare_with) if compare_with else None
+    canonical_of = _augment_header_map_by_values(
+        rows, src, list(columns or []), canonical_of, sample=sample)
     comparison_rows = [
         LV.canonicalize_row(row, canonical_of)
         for row in rows
@@ -371,7 +405,6 @@ def verify_export(ctx, compare_with=None, columns=None, row_count_mode="total",
             problems.append(f"导出 {len(rows)} 行，当前页 {n} 行")
 
     # --- 3. 抽样字段比对 ---
-    src = ctx.data.get(compare_with) if compare_with else None
     if src and columns:
         checked = 0
         diffs = []

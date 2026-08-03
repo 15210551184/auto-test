@@ -20,12 +20,11 @@ class RightColumnLayoutTests(unittest.TestCase):
 
 
 class DefaultExecutionTagsTests(unittest.TestCase):
-    def test_safe_read_only_categories_are_checked_by_default(self):
-        for tag in ("smoke", "health", "search", "list", "export"):
-            self.assertIn(
-                f'data-tagf value="{tag}" checked',
-                INDEX_HTML,
-            )
+    def test_query_is_the_default_content(self):
+        self.assertIn('<option value="search" selected>只测试查询</option>', INDEX_HTML)
+        self.assertIn('data-tagf value="search" checked', INDEX_HTML)
+        for tag in ("smoke", "health", "list", "export"):
+            self.assertNotIn(f'data-tagf value="{tag}" checked', INDEX_HTML)
 
     def test_mutating_and_language_categories_are_opt_in(self):
         self.assertIn('data-tagf value="crud">', INDEX_HTML)
@@ -33,10 +32,11 @@ class DefaultExecutionTagsTests(unittest.TestCase):
         self.assertNotIn('data-tagf value="crud" checked', INDEX_HTML)
         self.assertNotIn('data-tagf value="i18n" checked', INDEX_HTML)
 
-    def test_execution_presets_are_explicit_and_clear_is_removed(self):
-        for button_id in ("btnTagNormal", "btnTagAll", "btnTagSmoke",
-                          "btnTagExport", "btnTagExportI18n"):
-            self.assertIn(f'id="{button_id}"', INDEX_HTML)
+    def test_execution_modes_are_consolidated_into_one_select(self):
+        self.assertIn('id="execPreset"', INDEX_HTML)
+        for value in ("search", "export", "search_export", "full", "custom"):
+            self.assertIn(f'<option value="{value}"', INDEX_HTML)
+        self.assertNotIn('id="btnTagNormal"', INDEX_HTML)
         self.assertNotIn('id="btnTagNone"', INDEX_HTML)
         self.assertNotIn("都不选 = 全部", INDEX_HTML)
 
@@ -51,11 +51,16 @@ class DefaultExecutionTagsTests(unittest.TestCase):
         self.assertIn('class="exec-tag risk"', INDEX_HTML)
         self.assertIn("会创建并清理测试数据", INDEX_HTML)
 
-    def test_all_languages_and_export_presets_have_distinct_payloads(self):
+    def test_content_and_language_are_independent_dimensions(self):
         self.assertIn('value="__all__">全部配置语言（逐一执行）', INDEX_HTML)
-        self.assertIn("$('#btnTagExport').onclick=()=>setSelectedTags(['export'])", INDEX_HTML)
-        self.assertIn("$('#btnTagExportI18n').onclick=()=>{", INDEX_HTML)
+        self.assertIn("search:['search']", INDEX_HTML)
+        self.assertIn("export:['export']", INDEX_HTML)
+        self.assertIn("search_export:['search','export']", INDEX_HTML)
         self.assertIn("body.all_languages=true", INDEX_HTML)
+
+    def test_chinese_is_selected_as_default_execution_language(self):
+        self.assertIn("/简体中文|中文|chinese|zh[-_]?cn|^zh$/i", INDEX_HTML)
+        self.assertIn("sel.dataset.defaultLang=chinese", INDEX_HTML)
 
 
 class RuntimeTaskStatusTests(unittest.TestCase):

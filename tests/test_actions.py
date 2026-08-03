@@ -444,6 +444,14 @@ class SwitchLanguageTests(unittest.TestCase):
         self.assertIn("English", msg)
         self.assertIn(("get_by_text", "English"), ctx.page.calls)
 
+    def test_current_language_is_idempotent_and_does_not_click_again(self):
+        ctx = FakeLangCtx({"switcher_trigger": ".lang-switch",
+                           "options": {"zh": "中文", "en": "English"}})
+        ctx.vars["_current_lang"] = "zh"
+        msg = do_switch_language(ctx, to="zh")
+        self.assertIn("当前已是", msg)
+        self.assertEqual([], ctx.page.calls)
+
 
 class I18nLeakTests(unittest.TestCase):
     def test_dotted_key_leak_detected(self):

@@ -193,6 +193,42 @@ class ExportDetailAttachmentTests(unittest.TestCase):
 
         self.assertIn("抽样比对 3 个字段一致", msg)
 
+    def test_different_translated_headers_are_inferred_from_column_values(self):
+        columns = ["区号", "是否包车"]
+        EV._read_table = lambda path: [
+            {"Calling Code": "+221", "Charter Service": "开启"},
+            {"Calling Code": "+86", "Charter Service": "开启"},
+        ]
+        ctx = FakeCtx(
+            self.tmp.name,
+            ui_headers=["Area Code", "是否包车"],
+            total=2,
+        )
+        ctx.config.cases = [types.SimpleNamespace(steps=[
+            types.SimpleNamespace(
+                action="assert_headers",
+                params={"contains": columns},
+            ),
+        ])]
+        ctx.data["page_data"] = [
+            {"区号": "+221", "是否包车": "开启"},
+            {"区号": "+86", "是否包车": "开启"},
+        ]
+
+        msg, _ = EV.verify_export(
+            ctx, compare_with="page_data", columns=columns)
+
+        self.assertIn("抽样比对 4 个字段一致", msg)
+
+    def test_value_mapping_refuses_ambiguous_columns(self):
+        mapping = EV._augment_header_map_by_values(
+            [{"Unknown": "相同"}],
+            [{"字段A": "相同", "字段B": "相同"}],
+            ["字段A", "字段B"],
+            {},
+        )
+        self.assertEqual({}, mapping)
+
     def test_runtime_mapping_refuses_different_column_counts(self):
         ctx = FakeCtx(self.tmp.name, ui_headers=["Code pays", "Nom pays"])
         ctx.config.cases = [types.SimpleNamespace(steps=[

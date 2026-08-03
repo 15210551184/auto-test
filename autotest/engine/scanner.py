@@ -20,6 +20,7 @@ from playwright.sync_api import sync_playwright, Page
 from . import browser as B
 from .adapters.element_ui import ElementUIAdapter
 from .i18n_terms import words as _i18n_words
+from .language_switch import default_language_code, switch_page_language
 from .login import ensure_logged_in
 from .state import save_storage_state, valid_storage_state
 
@@ -756,14 +757,8 @@ class PageScanner:
         文字。扫描阶段容错，切不过去就返回 False 跳过这门语言，不影响其它
         语言、也不影响后面别的扫描项。
         """
-        target_text = (languages.get("options") or {}).get(code)
-        if not target_text:
-            return False
         try:
-            self.page.locator(languages["switcher_trigger"]).first.click(timeout=5000)
-            self.page.wait_for_timeout(300)
-            self.page.get_by_text(target_text, exact=True).first.click(timeout=5000)
-            self.page.wait_for_timeout(800)
+            switch_page_language(self.page, languages, code)
             return True
         except Exception:
             return False
@@ -983,6 +978,18 @@ def scan(url: str, storage_state: Optional[str] = None,
         page.set_default_timeout(5000)
         phase("等待页面就绪")
         ready_ms = _wait_for_scan_ready(page, wait)
+        # storage_state/localStorage 可能记住上次停留的英文或法文。扫描结果的
+        # canonical 列名必须稳定，先切回项目约定的中文基准再读取页面结构。
+        baseline_language = default_language_code(languages or {})
+        if baseline_language:
+            try:
+                changed = switch_page_language(page, languages, baseline_language)
+                if changed:
+                    ready_ms += _wait_for_scan_ready(page, wait)
+            except Exception:
+                # 基准切换失败不让整页扫描报废；后面的多语言扫描会再次尝试，
+                # 且执行报告会给出明确失败信息。
+                pass
         timings["页面加载"] = int((time.monotonic() - phase_started) * 1000)
         timings["就绪等待"] = ready_ms
 

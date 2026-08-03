@@ -14,6 +14,7 @@ from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 from . import datafactory as DF
 from . import normalize as N
 from .i18n_terms import words as _i18n_words
+from .language_switch import switch_page_language
 
 REGISTRY: Dict[str, Callable] = {}
 
@@ -600,14 +601,11 @@ def do_switch_language(ctx, to: str = None, **kw):
     if to not in options:
         raise LookupError(f"未知语言 '{to}'，配置里只有: {list(options)}")
 
-    page = ctx.page
     target_text = options[to]
-    page.locator(langs["switcher_trigger"]).first.click(timeout=5000)
-    page.wait_for_timeout(300)
-    page.get_by_text(target_text, exact=True).first.click(timeout=5000)
-    page.wait_for_timeout(1000)
+    changed = switch_page_language(
+        ctx.page, langs, to, current_code=ctx.vars.get("_current_lang"))
     ctx.vars["_current_lang"] = to
-    return f"已切换到 {target_text}"
+    return f"已切换到 {target_text}" if changed else f"当前已是 {target_text}"
 
 
 # 形如 common.search / menu.order.list —— i18n 库找不到翻译时常见的 fallback
