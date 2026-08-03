@@ -13,18 +13,18 @@
 from typing import List
 
 TERMS = {
-    "create": ["新增", "添加", "创建", "Add", "Create", "New"],
-    "edit": ["编辑", "修改", "Edit", "Modify", "Update"],
-    "delete": ["删除", "移除", "Delete", "Remove"],
-    "search": ["搜索", "查询", "Search", "Query"],
-    "reset": ["重置", "清空", "Reset", "Clear"],
-    "export": ["导出", "下载", "Export", "Download"],
-    "batch": ["批量", "Batch"],
-    "detail": ["查看", "详情", "View", "Detail", "Details"],
-    "disable": ["设为失效", "失效", "停用", "禁用", "冻结", "Disable", "Deactivate"],
-    "enable": ["设为生效", "生效", "启用", "解冻", "Enable", "Activate"],
-    "refresh": ["刷新", "Refresh"],
-    "logout": ["退出", "登出", "注销", "Logout", "Sign out"],
+    "create": ["新增", "添加", "创建", "Add", "Create", "New", "Ajouter", "Créer", "إضافة", "إنشاء"],
+    "edit": ["编辑", "修改", "Edit", "Modify", "Update", "Modifier", "تعديل"],
+    "delete": ["删除", "移除", "Delete", "Remove", "Supprimer", "حذف"],
+    "search": ["搜索", "查询", "Search", "Query", "Rechercher", "بحث"],
+    "reset": ["重置", "清空", "Reset", "Clear", "Réinitialiser", "Effacer", "إعادة تعيين", "مسح"],
+    "export": ["导出", "下载", "Export", "Download", "Exporter", "Télécharger", "تصدير", "تنزيل"],
+    "batch": ["批量", "Batch", "Lot", "دفعة"],
+    "detail": ["查看", "详情", "View", "Detail", "Details", "Voir", "Détails", "عرض", "تفاصيل"],
+    "disable": ["设为失效", "失效", "停用", "禁用", "冻结", "Disable", "Deactivate", "Désactiver", "تعطيل"],
+    "enable": ["设为生效", "生效", "启用", "解冻", "Enable", "Activate", "Activer", "تمكين"],
+    "refresh": ["刷新", "Refresh", "Actualiser", "تحديث"],
+    "logout": ["退出", "登出", "注销", "Logout", "Sign out", "Déconnexion", "تسجيل الخروج"],
 }
 
 

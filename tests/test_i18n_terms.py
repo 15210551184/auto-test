@@ -51,6 +51,10 @@ class DestructiveKeywordsCoverAllLanguagesTests(unittest.TestCase):
     def test_no_duplicate_entries(self):
         self.assertEqual(len(ElementUIAdapter.DESTRUCTIVE), len(set(ElementUIAdapter.DESTRUCTIVE)))
 
+    def test_french_and_arabic_dangerous_buttons_are_recognized(self):
+        self.assertIn("Supprimer", ElementUIAdapter.DESTRUCTIVE)
+        self.assertIn("حذف", ElementUIAdapter.DESTRUCTIVE)
+
 
 if __name__ == "__main__":
     unittest.main()

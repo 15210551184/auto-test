@@ -612,7 +612,13 @@ class ElementUIAdapter:
                     ".el-drawer:visible .el-drawer__close-btn",
                     ".el-message-box:visible .el-button:not(.el-button--primary)",
                     ".el-dialog:visible .el-button:has-text('取消')",
-                    ".el-dialog:visible .el-button:has-text('关闭')"):
+                    ".el-dialog:visible .el-button:has-text('关闭')",
+                    ".el-dialog:visible .el-button:has-text('Cancel')",
+                    ".el-dialog:visible .el-button:has-text('Close')",
+                    ".el-dialog:visible .el-button:has-text('Annuler')",
+                    ".el-dialog:visible .el-button:has-text('Fermer')",
+                    ".el-dialog:visible .el-button:has-text('إلغاء')",
+                    ".el-dialog:visible .el-button:has-text('إغلاق')"):
             try:
                 loc = page.locator(sel).first
                 loc.wait_for(state="visible", timeout=250)

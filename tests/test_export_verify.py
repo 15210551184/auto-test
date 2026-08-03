@@ -239,6 +239,10 @@ class ExportResponseDetectionTests(unittest.TestCase):
             self.url = url
             self.headers = headers
 
+    def test_export_button_fallback_covers_supported_languages(self):
+        for label in ("导出", "Export", "Exporter", "تصدير"):
+            self.assertIn(f":has-text('{label}')", EV._EXPORT_BUTTON_FALLBACK)
+
     def test_content_disposition_utf8_filename(self):
         response = self.FakeResponse(
             "http://example.test/api/export",

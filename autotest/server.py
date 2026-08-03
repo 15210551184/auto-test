@@ -28,7 +28,7 @@ from flask import (Flask, Response, jsonify, redirect, render_template_string,
 
 from engine import project as P
 from engine import tz
-from engine.abnormal_api import render_abnormal_api_csv
+from engine.abnormal_api import render_failed_case_api_csv
 from engine.explain import explain_config
 from engine.login import load_dotenv
 from engine.report_archive import write_report_zip
@@ -429,7 +429,7 @@ def api_download_report(dirname):
 
 @app.get("/api/reports/<dirname>/download-errors")
 def api_download_report_errors(dirname):
-    """只下载异常接口及其接口/用例异常描述。"""
+    """下载失败用例对应的接口地址及错误描述。"""
     if "/" in dirname or "\\" in dirname or ".." in dirname:
         return jsonify({"ok": False, "msg": "报告目录名不合法"}), 400
     report_dir = REPORT_DIR / dirname
@@ -443,7 +443,7 @@ def api_download_report_errors(dirname):
     except (OSError, ValueError):
         return jsonify({"ok": False, "msg": "报告执行结果已损坏"}), 422
 
-    content = render_abnormal_api_csv(results)
+    content = render_failed_case_api_csv(results)
     return send_file(
         io.BytesIO(content),
         mimetype="text/csv; charset=utf-8",

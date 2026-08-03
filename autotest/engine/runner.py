@@ -27,10 +27,25 @@ from .state import save_storage_state, valid_storage_state
 
 DEFAULT_SELECTORS = {
     "table": ".el-table",
-    "search_btn": "button:has-text('搜索'), button:has-text('查询')",
-    "reset_btn": "button:has-text('重置')",
-    "export_btn": "button:has-text('导出')",
-    "create_btn": "button:has-text('新增'), button:has-text('添加')",
+    "search_btn": (
+        "button:has-text('搜索'), button:has-text('查询'), "
+        "button:has-text('Search'), button:has-text('Query'), "
+        "button:has-text('Rechercher'), button:has-text('بحث')"
+    ),
+    "reset_btn": (
+        "button:has-text('重置'), button:has-text('Reset'), "
+        "button:has-text('Réinitialiser'), button:has-text('إعادة تعيين')"
+    ),
+    "export_btn": (
+        "button:has-text('导出'), button:has-text('Export'), "
+        "button:has-text('Exporter'), button:has-text('تصدير')"
+    ),
+    "create_btn": (
+        "button:has-text('新增'), button:has-text('添加'), "
+        "button:has-text('Add'), button:has-text('Create'), button:has-text('New'), "
+        "button:has-text('Ajouter'), button:has-text('Créer'), "
+        "button:has-text('إضافة'), button:has-text('إنشاء')"
+    ),
     "submit_btn": ".el-dialog:visible .el-button--primary",
 }
 
@@ -192,7 +207,13 @@ class Context:
         """selectors 里的别名 -> CSS；不是别名就当原始选择器用"""
         if not key:
             raise ValueError("选择器不能为空")
-        return self.config.selectors.get(key, DEFAULT_SELECTORS.get(key, key))
+        configured = self.config.selectors.get(key)
+        fallback = DEFAULT_SELECTORS.get(key)
+        # 页面配置常在中文状态下扫描生成。切换语言执行时，保留配置选择器的
+        # 同时追加内置多语言兜底，避免 Search/Add/Export 等按钮定位失效。
+        if configured and fallback and configured != fallback and key.endswith("_btn"):
+            return f"{configured}, {fallback}"
+        return configured or fallback or key
 
     def label_of(self, canonical: str) -> List[str]:
         """

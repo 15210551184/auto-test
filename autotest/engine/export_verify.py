@@ -16,6 +16,19 @@ from urllib.parse import unquote, urlparse
 from . import normalize as N
 
 
+_EXPORT_BUTTON_FALLBACK = (
+    "button:has-text('导出'), button:has-text('Export'), "
+    "button:has-text('Exporter'), button:has-text('تصدير')"
+)
+
+
+def _export_buttons(ctx):
+    """配置选择器之外，始终保留多语言按钮文本兜底。"""
+    configured = (ctx.selector("export_btn") or "").strip()
+    selector = f"{configured}, {_EXPORT_BUTTON_FALLBACK}" if configured else _EXPORT_BUTTON_FALLBACK
+    return ctx.page.locator(selector)
+
+
 def _phase(ctx, text: str) -> None:
     setter = getattr(ctx, "set_phase", None)
     if setter:
@@ -126,7 +139,7 @@ def _download_direct(ctx, timeout: int) -> Optional[str]:
     page.on("download", on_download)
     page.on("requestfinished", on_finished)
     try:
-        buttons = page.locator(ctx.selector("export_btn"))
+        buttons = _export_buttons(ctx)
         clicked = False
         for i in range(8):
             try:
@@ -145,7 +158,12 @@ def _download_direct(ctx, timeout: int) -> Optional[str]:
         confirm = page.locator(
             ".el-message-box:visible .el-button--primary, "
             ".el-dialog:visible button:has-text('确定'), "
-            ".el-dialog:visible button:has-text('导出')"
+            ".el-dialog:visible button:has-text('Confirm'), "
+            ".el-dialog:visible button:has-text('OK'), "
+            ".el-dialog:visible button:has-text('导出'), "
+            ".el-dialog:visible button:has-text('Export'), "
+            ".el-dialog:visible button:has-text('Exporter'), "
+            ".el-dialog:visible button:has-text('تصدير')"
         ).first
         try:
             confirm.wait_for(state="visible", timeout=350)
@@ -184,7 +202,7 @@ def _download_async(ctx, timeout: int) -> Optional[str]:
     api = getattr(ctx.config, "export_task_api", None)
     if not api:
         return None
-    ctx.page.locator(ctx.selector("export_btn")).first.click()
+    _export_buttons(ctx).first.click()
     deadline = time.time() + timeout / 1000
     poll = 0
     while time.time() < deadline:
