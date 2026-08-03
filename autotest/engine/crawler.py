@@ -591,6 +591,7 @@ def discover(home_url: str, login_cfg: Optional[dict] = None,
         if state:
             args["storage_state"] = state
         bctx = browser.new_context(**args)
+        B.optimize_scan_context(bctx)
         bctx.set_default_timeout(20000)
         page = bctx.new_page()
 

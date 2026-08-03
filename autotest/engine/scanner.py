@@ -906,6 +906,7 @@ def probe_languages(url: str, switcher_trigger: str, storage_state: Optional[str
         if state:
             args["storage_state"] = state
         bctx = browser.new_context(**args)
+        B.optimize_scan_context(bctx)
         page = bctx.new_page()
         sc = PageScanner(page)
         if login:
@@ -967,6 +968,7 @@ def scan(url: str, storage_state: Optional[str] = None,
         if state:
             args["storage_state"] = state
         bctx = browser.new_context(**args)
+        B.optimize_scan_context(bctx)
         page = bctx.new_page()
         sc = PageScanner(page)
         phase("登录并加载页面")
@@ -1060,6 +1062,7 @@ def redetect_list_api(url: str, storage_state: Optional[str] = None,
         if state:
             args["storage_state"] = state
         bctx = browser.new_context(**args)
+        B.optimize_scan_context(bctx)
         page = bctx.new_page()
         sc = PageScanner(page)
         if login:
@@ -1096,6 +1099,7 @@ def redetect_list_apis(pages: List[Dict[str, str]],
         if state:
             args["storage_state"] = state
         bctx = browser.new_context(**args)
+        B.optimize_scan_context(bctx)
         try:
             total = len(items)
             for index, item in enumerate(items, 1):
