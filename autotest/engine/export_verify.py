@@ -82,8 +82,16 @@ def _phase(ctx, text: str) -> None:
 
 def _read_table(path: str) -> List[Dict[str, Any]]:
     """读 xlsx / xls / csv，统一成 list[dict]"""
-    import pandas as pd
     ext = Path(path).suffix.lower()
+    if ext in (".xlsx", ".xlsm"):
+        with open(path, "rb") as f:
+            magic = f.read(4)
+        # xlsx/xlsm 本质是 ZIP，合法文件必定以 PK 开头。接口返回 JSON/HTML
+        # 却沿用 .xlsx 文件名时，提前给出业务可读错误，不让 pandas 抛出
+        # “must specify an engine manually”这种误导信息。
+        if not magic.startswith(b"PK"):
+            raise ValueError("文件扩展名是 xlsx，但响应内容不是有效的 Excel ZIP 文件")
+    import pandas as pd
     if ext in (".xlsx", ".xls", ".xlsm"):
         df = pd.read_excel(path, dtype=object)
     elif ext == ".csv":
@@ -110,6 +118,23 @@ def _read_table(path: str) -> List[Dict[str, Any]]:
         df = df.loc[:, [c for c in df.columns if c and c.lower() != "nan"]]
 
     return df.where(df.notna(), None).to_dict("records")
+
+
+def _response_content_preview(path: str, limit: int = 500) -> str:
+    """格式错误时提取 JSON/HTML/文本响应摘要；二进制则展示文件头。"""
+    try:
+        raw = Path(path).read_bytes()[:limit]
+    except OSError:
+        return ""
+    for encoding in ("utf-8-sig", "gbk", "utf-8"):
+        try:
+            text = raw.decode(encoding).strip()
+            if text and sum(ch.isprintable() or ch in "\r\n\t" for ch in text) \
+                    >= len(text) * 0.85:
+                return re.sub(r"\s+", " ", text)[:limit]
+        except UnicodeDecodeError:
+            continue
+    return f"二进制文件头: {raw[:24].hex(' ')}"
 
 
 def _export_response_name(resp) -> Optional[str]:
@@ -408,8 +433,27 @@ def verify_export(ctx, compare_with=None, columns=None, row_count_mode="total",
     if size == 0:
         raise AssertionFailed(f"导出文件为空: {path}")
 
+    download = {"label": f"导出文件 {Path(path).name}",
+                "path": os.path.relpath(path, ctx.report_root)}
+    base_detail = {
+        "download": download,
+        "images": evidence_images,
+        "export_api": getattr(ctx, "_last_export_api", None),
+    }
     _phase(ctx, f"导出：读取文件 {Path(path).name}")
-    rows = _read_table(path)
+    try:
+        rows = _read_table(path)
+    except Exception as e:
+        preview = _response_content_preview(path)
+        export_api = getattr(ctx, "_last_export_api", None) or {}
+        content_type = export_api.get("content_type") or "未知"
+        message = (
+            f"导出接口返回的文件无法解析：{e}；"
+            f"Content-Type={content_type}"
+        )
+        if preview:
+            message += f"；响应内容摘要={preview}"
+        raise AssertionFailed(message, detail=base_detail)
     # 页面和导出文件在英文/法文/阿文状态下使用的是翻译后表头，而 YAML 的
     # columns 以及 capture 保存的页面数据使用 canonical（通常为中文）列名。
     # 两边先统一映射回 canonical，再进行缺列和字段值比较。
@@ -490,13 +534,7 @@ def verify_export(ctx, compare_with=None, columns=None, row_count_mode="total",
         else:
             problems.append("没有任何字段实际参与数据比对")
 
-    download = {"label": f"导出文件 {Path(path).name}",
-                "path": os.path.relpath(path, ctx.report_root)}
-    detail = {
-        "download": download,
-        "images": evidence_images,
-        "export_api": getattr(ctx, "_last_export_api", None),
-    }
+    detail = base_detail
     if problems:
         # 把导出文件本身挂到报告上：导出对不对，光看一句"缺少列 X/Y"判断不了
         # 是"导出真漏了"还是"页面表头识别多了"，直接把文件下下来打开看最快。

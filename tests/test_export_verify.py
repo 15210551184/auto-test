@@ -152,6 +152,34 @@ class ExportDetailAttachmentTests(unittest.TestCase):
                          detail["export_api"]["url"])
         self.assertEqual(200, detail["export_api"]["status"])
 
+    def test_fake_xlsx_response_reports_content_instead_of_pandas_engine_error(self):
+        self.fake_path.write_text(
+            '{"code":500,"message":"export failed"}', encoding="utf-8")
+        EV._read_table = self._orig_read_table
+        ctx = FakeCtx(self.tmp.name, ui_headers=["国家"])
+
+        def downloaded(current_ctx, timeout):
+            current_ctx._last_export_api = {
+                "method": "POST",
+                "url": "http://example.test/api/country/export",
+                "status": 200,
+                "duration_ms": 123,
+                "content_type": "application/json",
+            }
+            return str(self.fake_path)
+
+        EV._download_direct = downloaded
+        with self.assertRaises(AssertionFailed) as cm:
+            EV.verify_export(ctx)
+
+        message = str(cm.exception)
+        self.assertIn("不是有效的 Excel ZIP 文件", message)
+        self.assertIn("Content-Type=application/json", message)
+        self.assertIn("export failed", message)
+        self.assertNotIn("specify an engine", message)
+        self.assertEqual("http://example.test/api/country/export",
+                         cm.exception.detail["export_api"]["url"])
+
     def test_translated_headers_are_compared_by_canonical_name(self):
         columns = ["国家编码", "国家名称", "状态"]
         EV._read_table = lambda path: [{
