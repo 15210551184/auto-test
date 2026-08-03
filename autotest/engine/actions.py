@@ -4,8 +4,10 @@
 配置里每个 step 的键名对应这里的一个函数。加新能力 = 加一个 @action 函数，
 不用改引擎。ctx 是执行上下文，带着 page / adapter / 变量池 / 抓取的数据。
 """
+import json
 import re
 from typing import Any, Callable, Dict, List
+from urllib.parse import urlparse
 
 from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
@@ -152,12 +154,12 @@ def do_search(ctx, **kw):
 
     等接口超时有两种完全不同的原因：
     1. 批量执行并发跑多个页面时，接口响应比单独手动测慢一截，偶尔卡过
-       超时线——接口本身没问题，纯粹是撞上了并发高峰。超时先重试一次
-       （等一拍再点一次搜索），大概率第二次就赶上峰值过去了。
+       超时线——接口本身没问题，纯粹是撞上了并发高峰。快速探测未命中且
+       没找到替代接口时再重试一次，并使用页面配置的完整超时。
     2. list_api 这个 URL 片段配错了/过期了——页面搜索其实成功了，只是
-       等的 URL 跟实际触发的接口对不上，两次重试都不会有用（等的目标
-       根本不存在）。两次都超时后，失败消息里会把这期间实际收到的
-       JSON 接口列出来，方便直接判断是"接口慢"还是"list_api 配错了"。
+       等的 URL 跟实际触发的接口对不上。快速探测期间若捕获到另一个可信的
+       列表响应，会自动纠正本次页面配置；仍无法识别时才重试并在失败消息里
+       列出实际收到的 JSON 接口。
     超时时长可以在页面配置里用 search_timeout（毫秒）单独调，默认 30s。
 
     搜索前后各截一张图，作为报告里的"搜索前/搜索后"对比——这条用例
@@ -169,16 +171,31 @@ def do_search(ctx, **kw):
     frag = ctx.config.list_api
     btn = ctx.selector("search_btn")
     timeout = ctx.config.search_timeout
+    recovered_api = None
     if frag:
         retried = False
+        api_log_start = len(ctx.api_log)
         for attempt in range(2):
             try:
+                # 第一轮只用 5 秒探测配置接口。若 YAML 的 list_api 误写成
+                # 下拉候选接口，真正的主列表响应通常早已返回并进入 api_log；
+                # 没必要对一个永远不会出现的地址空等完整 30 秒。
+                attempt_timeout = min(timeout, 5000) if attempt == 0 else timeout
                 with ctx.page.expect_response(
-                    lambda r: frag in r.url and r.status == 200, timeout=timeout
+                    lambda r: frag in r.url and r.status == 200,
+                    timeout=attempt_timeout,
                 ) as info:
                     ctx.page.locator(btn).first.click()
                 break
             except PlaywrightTimeoutError as e:
+                inferred = _infer_list_api_from_calls(
+                    ctx, ctx.api_log[api_log_start:])
+                if inferred:
+                    recovered_api, payload = inferred
+                    ctx.config.list_api = recovered_api
+                    frag = recovered_api
+                    ctx.last_api = payload
+                    break
                 if attempt == 1:
                     # 两次都等不到——很可能不是"响应慢"，是 list_api 这个
                     # URL 片段本身就配错了，页面搜索其实早就成功了，只是
@@ -196,22 +213,76 @@ def do_search(ctx, **kw):
                     raise PlaywrightTimeoutError(f"{e}\n{hint}") from e
                 retried = True
                 ctx.page.wait_for_timeout(800)   # 给并发高峰一点时间过去，再重试
-        try:
-            ctx.last_api = info.value.json()
-        except Exception:
-            ctx.last_api = None
+        if recovered_api is None:
+            try:
+                ctx.last_api = info.value.json()
+            except Exception:
+                ctx.last_api = None
     else:
         ctx.page.locator(btn).first.click()
         ctx.page.wait_for_timeout(1500)
         retried = False
     ctx.page.wait_for_timeout(400)
-    msg = "执行搜索（重试后成功）" if retried else "执行搜索"
+    if recovered_api:
+        msg = f"执行搜索（已自动纠正列表接口: {recovered_api}）"
+    else:
+        msg = "执行搜索（重试后成功）" if retried else "执行搜索"
     after = ctx.shot("search_after") if evidence else ""
     detail = None
     if before or after:
         detail = {"images": [{"label": "搜索前", "path": before},
                             {"label": "搜索后", "path": after}]}
     return msg, detail
+
+
+_NON_LIST_API = re.compile(
+    r"(?:/getInfo|/getRouters|/notice/listTop|/dict/|/locale/|/captcha)",
+    re.I,
+)
+
+
+def _infer_list_api_from_calls(ctx, calls):
+    """从一次搜索点击后新出现的 JSON 响应里推断真实主列表接口。
+
+    只看本次点击之后的调用，避免把页面初始化时加载的国家/城市/加盟商下拉
+    接口拿来“纠错”。候选还必须同时具备列表型 URL 或列表型响应结构；通知、
+    字典、路由等全局接口会被排除。返回 ``(URL path, JSON payload)``。
+    """
+    best = None
+    for order, call in enumerate(calls):
+        if not isinstance(call, dict) or call.get("status", 200) != 200:
+            continue
+        url = str(call.get("url") or "")
+        if not url or _NON_LIST_API.search(url):
+            continue
+        path = urlparse(url).path
+        score = 0
+        if re.search(r"(?:list|page|query|search|find|record)", path, re.I):
+            score += 3
+
+        body = call.get("response_body")
+        payload = None
+        if body:
+            try:
+                payload = json.loads(body)
+            except Exception:
+                payload = None
+            if re.search(r'"(?:rows|records|items|list)"\s*:\s*\[', body, re.I):
+                score += 6
+            elif re.search(r'"data"\s*:\s*\[', body, re.I):
+                score += 4
+            if re.search(r'"(?:total|count)"\s*:', body, re.I):
+                score += 2
+
+        # 页面 URL 和接口共享业务词时再加一点可信度，但它只是辅助证据。
+        page_path = urlparse(getattr(ctx.page, "url", "") or "").path.lower()
+        words = [w for w in re.split(r"[^a-z0-9]+", path.lower())
+                 if len(w) >= 4 and w not in {"web", "list", "page", "query"}]
+        if any(word in page_path for word in words):
+            score += 2
+        if score >= 5 and (best is None or (score, order) > best[:2]):
+            best = (score, order, path, payload)
+    return (best[2], best[3]) if best else None
 
 
 # ============ 第一期：全自动健康巡检 ============

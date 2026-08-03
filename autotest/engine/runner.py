@@ -16,7 +16,8 @@ from playwright.sync_api import sync_playwright, Page
 from . import browser as B
 from . import lang_variants as LV
 from . import progress
-from .actions import REGISTRY, AssertionFailed, AssertionWarning
+from .actions import (REGISTRY, AssertionFailed, AssertionWarning,
+                      _infer_list_api_from_calls)
 from .login import LoginError, ensure_logged_in, is_login_page
 from .adapters.element_ui import ElementUIAdapter
 from .models import Case, CaseResult, PageConfig, PageResult, Status, Step, StepResult
@@ -432,12 +433,31 @@ def run_case(ctx: Context, case: Case) -> CaseResult:
         # 这里改用正确的用法：包住 goto，等的就是这次导航真正触发的那次列表请求。
         try:
             with ctx.page.expect_response(
-                lambda r: frag in r.url and r.status == 200, timeout=15000
+                lambda r: frag in r.url and r.status == 200, timeout=5000
             ):
                 ctx.page.goto(ctx.config.url, wait_until="domcontentloaded", timeout=60000)
             ctx.page.wait_for_timeout(500)
         except Exception:
-            ctx.page.wait_for_timeout(3000)   # 没等到，退回一个更保守的固定等待
+            # 旧 YAML 可能把扫描表单时请求的国家/城市/加盟商下拉接口写成
+            # list_api。页面导航后的真实列表响应已经进入 api_log 时，直接
+            # 自动纠正内存配置，同页后续所有用例立即复用，不再每条先等 15 秒。
+            inferred = _infer_list_api_from_calls(ctx, ctx.api_log)
+            if inferred:
+                actual_api, payload = inferred
+                ctx.config.list_api = actual_api
+                ctx.last_api = payload
+                ctx.page.wait_for_timeout(500)
+            else:
+                # 没有替代候选时仍给真正的慢接口保留原来的总计 15 秒预算。
+                try:
+                    with ctx.page.expect_response(
+                        lambda r: frag in r.url and r.status == 200,
+                        timeout=10000,
+                    ):
+                        pass
+                    ctx.page.wait_for_timeout(500)
+                except Exception:
+                    ctx.page.wait_for_timeout(3000)
     else:
         ctx.page.goto(ctx.config.url, wait_until="domcontentloaded", timeout=60000)
         ctx.page.wait_for_timeout(1500)

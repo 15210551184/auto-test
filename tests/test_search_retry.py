@@ -61,9 +61,15 @@ class FakeSearchPage:
         self._outcomes = list(outcomes)   # 每次 expect_response 调用消费一个
         self.click_count = 0
         self.waits = []
+        self.on_click = None
+        self.url = "http://x.test/web/account/rechargeRecord"
 
     def locator(self, sel):
-        return FakeLocator(on_click=lambda: setattr(self, "click_count", self.click_count + 1))
+        def clicked():
+            self.click_count += 1
+            if self.on_click:
+                self.on_click()
+        return FakeLocator(on_click=clicked)
 
     def expect_response(self, predicate, timeout=None):
         return FakeExpectResponseCM(self._outcomes.pop(0))
@@ -110,6 +116,27 @@ class SearchRetryTests(unittest.TestCase):
         msg, detail = do_search(ctx)
         self.assertIn("重试后成功", msg)
         self.assertEqual(2, ctx.page.click_count)
+
+    def test_wrong_configured_api_recovers_from_actual_list_response(self):
+        ctx = FakeCtx(["timeout"])
+        ctx.config.list_api = "/api/vaWeb/business/franchisee/list"
+
+        def record_actual_response():
+            ctx.api_log.append({
+                "url": "http://x.test/api/vaWeb/account/recharge/record/page?pageNum=1",
+                "status": 200,
+                "response_body": '{"code":200,"data":{"records":[],"total":0}}',
+            })
+
+        ctx.page.on_click = record_actual_response
+        msg, detail = do_search(ctx)
+
+        self.assertIn("已自动纠正列表接口", msg)
+        self.assertEqual(
+            "/api/vaWeb/account/recharge/record/page",
+            ctx.config.list_api,
+        )
+        self.assertEqual(1, ctx.page.click_count)
 
     def test_returns_before_after_screenshots_for_report(self):
         # 报告里要能看"搜索前/搜索后"对比图，不是只有一句"执行搜索"。
@@ -159,9 +186,9 @@ class SearchRetryTests(unittest.TestCase):
         self.assertIn("没收到任何 JSON 接口响应", str(cm.exception))
 
     def test_uses_configured_search_timeout(self):
-        # search_timeout 页面配置能覆盖默认值，不是写死的 30000
+        # 第一轮是快速探测，失败后第二轮仍会使用页面配置的完整超时。
         seen_timeouts = []
-        ctx = FakeCtx(["ok"])
+        ctx = FakeCtx(["timeout", "ok"])
         ctx.config.search_timeout = 45000
         orig = ctx.page.expect_response
         def spy(predicate, timeout=None):
@@ -169,7 +196,7 @@ class SearchRetryTests(unittest.TestCase):
             return orig(predicate, timeout=timeout)
         ctx.page.expect_response = spy
         do_search(ctx)
-        self.assertEqual([45000], seen_timeouts)
+        self.assertEqual([5000, 45000], seen_timeouts)
 
 
 if __name__ == "__main__":

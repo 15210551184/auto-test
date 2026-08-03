@@ -988,6 +988,13 @@ def scan(url: str, storage_state: Optional[str] = None,
         phase("识别表格")
         table = sc.scan_table()
         timings["表格"] = int((time.monotonic() - phase_started) * 1000)
+
+        # 主列表接口必须在探测下拉选项之前确定。scan_form() 会逐个打开国家、
+        # 城市、加盟商等下拉框，这些控件也会请求 */list；如果等表单扫完再猜，
+        # 最后出现的下拉候选接口很容易覆盖页面加载时真正的主列表接口。
+        # “账户充值记录”被误识别成 /business/franchisee/list 就是这种情况。
+        list_api = sc.guess_list_api(sample_row=table.get("sample_row"))
+
         phase_started = time.monotonic()
         phase("识别筛选项")
         form_fields = sc.scan_form()
@@ -996,7 +1003,6 @@ def scan(url: str, storage_state: Optional[str] = None,
         phase("识别按钮、分页和接口")
         buttons = sc.scan_buttons()
         pagination = sc.scan_pagination()
-        list_api = sc.guess_list_api(sample_row=table.get("sample_row"))
         timings["按钮/分页/API"] = int((time.monotonic() - phase_started) * 1000)
         report = {
             "url": url,
