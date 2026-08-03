@@ -235,7 +235,7 @@ def _find_download_url(node, depth=0):
 
 
 def verify_export(ctx, compare_with=None, columns=None, row_count_mode="total",
-                  timeout=90000, header_match=True, sample=20) -> str:
+                  timeout=45000, header_match=True, sample=20) -> str:
     from .actions import AssertionFailed
 
     # 导出证据的第一张图：下载前的真实列表页。Context.shot 会在宽表场景
@@ -249,7 +249,7 @@ def verify_export(ctx, compare_with=None, columns=None, row_count_mode="total",
     path = None
     export_started = time.monotonic()
     # timeout 是整次导出的总预算，不是每个下载策略各自的预算。以前 auto
-    # 会先等 direct 20s，再把完整 90s 给 async，单条用例实际可等 110s+，
+    # 曾经会先等 direct 20s，再把完整 90s 给 async，单条用例实际可等 110s+，
     # 页面看起来像卡死。现在无论走几种策略，总等待都不会超过配置值。
     export_deadline = export_started + max(1, timeout) / 1000
     api_log_start = len(getattr(ctx, "api_log", None) or [])

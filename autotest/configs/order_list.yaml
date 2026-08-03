@@ -160,7 +160,7 @@ cases:
           compare_with: page_data
           columns: [下单人手机号, 乘车人手机号, 订单金额, 实际支付金额, 创建时间]
           row_count: total       # 导出应是全量，与分页总数比对
-          timeout: 90000
+          timeout: 45000
 
   - name: 导出-带搜索条件
     tags: [export]

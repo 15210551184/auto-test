@@ -1038,7 +1038,7 @@ def do_confirm(ctx, ok: bool = True, **kw):
 
 @action("export_and_verify")
 def do_export(ctx, compare_with: str = None, columns: list = None,
-              row_count: str = "total", timeout: int = 90000,
+              row_count: str = "total", timeout: int = 45000,
               header_match: bool = True, sample: int = 20, **kw):
     """
     导出验证三件事：

@@ -67,13 +67,33 @@ STAGGER_DELAY_SEC = 2
 # 一条用例可能在等导出文件或慢接口，旧逻辑直到用例结束才打印任何内容，
 # 看起来像任务彻底卡死。定期打印心跳，让日志明确显示仍在执行哪条用例。
 RUN_HEARTBEAT_SEC = 30
-# 单条用例的兜底预算。正常动作本身通常 5~90 秒内有明确超时；这个上限
+# 单条用例的兜底预算。正常动作本身通常 5~45 秒内有明确超时；这个上限
 # 防止异常页面长期占住 worker，同时不会像“整页 60 秒”那样误杀有十几条
 # 用例的正常页面。
 CASE_RUN_TIMEOUT_SEC = 150
 
 # 修改扫描报告结构或 scanner 的识别语义时递增，使旧缓存自动失效。
 SCAN_CACHE_VERSION = 6
+
+# 只发布已经完整结束的页面。收到停止信号时，CLI 从这里立即取快照生成报告，
+# 不读取仍被 worker 修改的 PageResult，也不等待卡住的页面退出。
+_partial_lock = threading.Lock()
+_partial_results: List[PageResult] = []
+
+
+def reset_partial_results() -> None:
+    with _partial_lock:
+        _partial_results.clear()
+
+
+def publish_partial_result(result: PageResult) -> None:
+    with _partial_lock:
+        _partial_results.append(result)
+
+
+def partial_results_snapshot() -> List[PageResult]:
+    with _partial_lock:
+        return list(_partial_results)
 
 
 def _log(cb, msg):
@@ -465,6 +485,7 @@ def run_selected(dir_name: str, out_dir: str,
     标签页里——并发跑的时候几个页面的日志会交替出现，没有前缀会看不清
     哪行是哪个页面的。
     """
+    reset_partial_results()
     proj = P.load_project(dir_name)
     if not proj:
         raise ValueError("项目不存在")
@@ -570,6 +591,7 @@ def run_selected(dir_name: str, out_dir: str,
             pr = PageResult(name, "")
             pr.cases.append(CaseResult("配置", Status.ERROR, error=str(e)))
             results[idx] = pr
+            publish_partial_result(pr)
             with lock:
                 counters["done"] += 1
                 counters["failed"] += 1
@@ -641,6 +663,9 @@ def run_selected(dir_name: str, out_dir: str,
             _log(on_log, f"{tag} 小计：通过 {pr.passed} / 失败 {pr.failed}")
             results[idx] = pr
             browser.close()
+
+        # browser 已关闭、PageResult 不会再变化，此时才允许停止处理器拿去写报告。
+        publish_partial_result(pr)
 
         with lock:
             # 进度条右侧和任务状态面板都按“页面”统计。之前这里累加的是

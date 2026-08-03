@@ -222,6 +222,16 @@ class ExportDetailAttachmentTests(unittest.TestCase):
         self.assertLessEqual(calls[1][1], 70000)
         self.assertGreater(calls[1][1], 69000)
 
+    def test_default_export_timeout_is_forty_five_seconds(self):
+        ctx = FakeCtx(self.tmp.name, ui_headers=["国家"], export_mode="direct")
+        calls = []
+        EV._download_direct = lambda current_ctx, timeout: calls.append(timeout)
+
+        with self.assertRaises(AssertionFailed):
+            EV.verify_export(ctx)
+
+        self.assertEqual([45000], calls)
+
 
 class ExportResponseDetectionTests(unittest.TestCase):
     class FakeResponse:
