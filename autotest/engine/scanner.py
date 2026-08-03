@@ -797,8 +797,13 @@ class PageScanner:
         canonical_dialog_labels = [f["label"] for f in
                                    (report.get("create_form") or {}).get("fields", [])]
         has_create = report.get("buttons", {}).get("create", False)
+        baseline_code = default_language_code(languages)
 
         for code in scan_langs:
+            # canonical 文案已经在基准语言下扫描完成，重复切回并重新扫描不会
+            # 产生任何 variant，反而会多一次容易受 hover 菜单影响的交互。
+            if code == baseline_code:
+                continue
             if not self.switch_language(languages, code):
                 continue
             _merge_positional(label_variants, canonical_labels,

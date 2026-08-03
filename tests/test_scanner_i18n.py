@@ -199,6 +199,28 @@ class ScanLanguageVariantsOrchestrationTests(unittest.TestCase):
         self.assertEqual(["fr"], attempted)
         self.assertEqual({"国家": {"fr": "Pays"}}, label_v)
 
+    def test_default_language_is_canonical_and_not_scanned_again(self):
+        report = {
+            "form_fields": [{"label": "国家"}],
+            "table": {"headers": ["国家"]},
+            "buttons": {"create": False},
+        }
+        languages = {
+            "switcher_trigger": ".lang-select",
+            "options": {"简体中文": "简体中文", "英文": "英文"},
+            "scan_languages": ["简体中文", "英文"],
+        }
+        attempted = []
+        self.sc.switch_language = lambda langs, code: attempted.append(code) or True
+        self.sc.scan_form_labels = lambda: ["Country"]
+        self.sc.scan_table_headers = lambda: ["Country"]
+
+        label_v, header_v = self.sc.scan_language_variants(languages, report)
+
+        self.assertEqual(["英文"], attempted)
+        self.assertEqual({"国家": {"英文": "Country"}}, label_v)
+        self.assertEqual({"国家": {"英文": "Country"}}, header_v)
+
 
 class ToConfigPropagatesVariantsTests(unittest.TestCase):
     def test_label_and_header_variants_copied_into_cfg(self):

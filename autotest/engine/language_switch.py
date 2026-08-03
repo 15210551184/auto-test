@@ -68,7 +68,10 @@ def switch_page_language(page, languages: Dict[str, Any], code: str,
     except Exception:
         pass
 
-    trigger.click(timeout=5000)
+    # 该项目的语言入口是仅图标的 Element UI hover dropdown。无头浏览器里
+    # 元素明明有尺寸且可见，普通 click 仍可能把 5 秒耗尽在 actionability
+    # 检查上；目标由配置中的稳定选择器限定，强制点击更符合这里的语义。
+    trigger.click(timeout=5000, force=True)
     page.wait_for_timeout(300)
     target = _visible_target(page, target_text)
     if target is None:
@@ -78,7 +81,7 @@ def switch_page_language(page, languages: Dict[str, Any], code: str,
         # active 菜单项表示；确认后必须把菜单收起，否则扫描下一种语言时再点
         # trigger 会把菜单关闭，随后便误报“找不到可见选项”。
         try:
-            trigger.click(timeout=5000)
+            trigger.click(timeout=5000, force=True)
             page.wait_for_timeout(100)
         except Exception:
             pass
