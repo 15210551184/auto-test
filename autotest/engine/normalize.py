@@ -21,6 +21,20 @@ DATE_FORMATS = [
 
 EMPTY_TOKENS = {"", "-", "--", "—", "无", "N/A", "null", "None", "暂无"}
 
+# 同一个状态枚举在页面和导出模板中经常由两套字典翻译，例如页面显示
+# Enabled、导出显示“生效”。只归一化语义明确的完整单词，不能用 contains，
+# 避免把业务名称中偶然出现的 active/enable 误判成状态。
+ENUM_ALIASES = {
+    "enabled": "enabled", "enable": "enabled", "active": "enabled",
+    "启用": "enabled", "生效": "enabled", "开启": "enabled", "有效": "enabled",
+    "actif": "enabled", "activé": "enabled",
+    "activée": "enabled", "مفعل": "enabled", "نشط": "enabled", "تمكين": "enabled",
+    "disabled": "disabled", "disable": "disabled", "inactive": "disabled",
+    "停用": "disabled", "失效": "disabled", "关闭": "disabled", "无效": "disabled",
+    "inactif": "disabled", "désactivé": "disabled", "desactive": "disabled",
+    "معطل": "disabled", "غير نشط": "disabled",
+}
+
 
 def is_empty(v: Any) -> bool:
     return v is None or str(v).strip() in EMPTY_TOKENS
@@ -80,6 +94,12 @@ def text(v: Any) -> str:
     return s
 
 
+def enum(v: Any) -> Optional[str]:
+    """已知多语言枚举值归一化；未知文本返回 None。"""
+    value = text(v).casefold()
+    return ENUM_ALIASES.get(value)
+
+
 def truncated(v: Any) -> bool:
     """页面值是否被 CSS/JS 截断，截断的值只能做前缀比对"""
     s = text(v)
@@ -128,6 +148,11 @@ def compare(a: Any, b: Any, kind: str = "auto", tolerance: float = None) -> bool
     if kind in ("auto", "text") and truncated(b):
         prefix = text(b).rstrip(".…").rstrip()
         return text(a).startswith(prefix)
+
+    if kind in ("auto", "text"):
+        enum_a, enum_b = enum(a), enum(b)
+        if enum_a is not None or enum_b is not None:
+            return enum_a is not None and enum_a == enum_b
 
     na, nb = fn(a), fn(b)
     if na is None and nb is None:

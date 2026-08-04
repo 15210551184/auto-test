@@ -117,6 +117,26 @@ class ScanLanguageVariantsOrchestrationTests(unittest.TestCase):
         self.assertEqual(["en", "fr"], attempted)
         self.assertEqual({"国家": {"fr": "Pays"}}, label_v)
 
+    def test_waits_for_first_language_form_to_finish_rerendering(self):
+        report = {
+            "form_fields": [{"label": "国家"}, {"label": "城市"}],
+            "table": {"headers": ["国家", "城市"]},
+            "buttons": {"create": False},
+        }
+        languages = {"switcher_trigger": ".lang", "options": {"fr": "Français"},
+                     "scan_languages": ["fr"]}
+        self.sc.switch_language = lambda langs, code: True
+        form_reads = iter([[], ["Pays"], ["Pays", "Ville"]])
+        header_reads = iter([["Pays"], ["Pays", "Ville"]])
+        self.sc.scan_form_labels = lambda: next(form_reads)
+        self.sc.scan_table_headers = lambda: next(header_reads)
+        self.sc.page.wait_for_timeout = lambda ms: None
+
+        label_v, header_v = self.sc.scan_language_variants(languages, report)
+
+        self.assertEqual({"国家": {"fr": "Pays"}, "城市": {"fr": "Ville"}}, label_v)
+        self.assertEqual({"国家": {"fr": "Pays"}, "城市": {"fr": "Ville"}}, header_v)
+
     def test_merges_dialog_labels_when_create_button_present(self):
         report = {
             "form_fields": [],

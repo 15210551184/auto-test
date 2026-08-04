@@ -827,6 +827,23 @@ class PageScanner:
         has_create = report.get("buttons", {}).get("create", False)
         baseline_code = default_language_code(languages)
 
+        def scan_aligned(scan_fn, canonical, attempts: int = 12):
+            """语言切换会触发整页异步重绘，等结构真正与基准页对齐。
+
+            过去固定等待 1 秒后只读一次。批量扫描时第一门外语经常仍处于
+            表单卸载/重建之间，得到空数组或残缺数组，于是整门语言的映射被
+            静默丢弃；后面的语言因为页面已经热起来反而正常。
+            """
+            if not canonical:
+                return []
+            latest = []
+            for _ in range(attempts):
+                latest = scan_fn()
+                if len(latest) == len(canonical):
+                    return latest
+                self.page.wait_for_timeout(300)
+            return latest
+
         for code in scan_langs:
             # canonical 文案已经在基准语言下扫描完成，重复切回并重新扫描不会
             # 产生任何 variant，反而会多一次容易受 hover 菜单影响的交互。
@@ -834,10 +851,14 @@ class PageScanner:
                 continue
             if not self.switch_language(languages, code):
                 continue
+            translated_labels = scan_aligned(
+                self.scan_form_labels, canonical_labels)
+            translated_headers = scan_aligned(
+                self.scan_table_headers, canonical_headers)
             _merge_positional(label_variants, canonical_labels,
-                              self.scan_form_labels(), code)
+                              translated_labels, code)
             _merge_positional(header_variants, canonical_headers,
-                              self.scan_table_headers(), code)
+                              translated_headers, code)
             if has_create and canonical_dialog_labels:
                 translated_dialog_labels = (
                     self.scan_dialog_labels(dialog_positions)

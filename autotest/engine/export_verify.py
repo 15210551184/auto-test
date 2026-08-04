@@ -9,6 +9,7 @@
 import os
 import re
 import time
+from difflib import SequenceMatcher
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 from urllib.parse import unquote, urlparse
@@ -41,6 +42,63 @@ def _runtime_header_map(ctx, explicit: Dict[str, str]) -> Dict[str, str]:
         {}, _configured_headers(ctx), list(ctx.ui.headers(ctx.page)))
     mapping.update(explicit)
     return mapping
+
+
+def _header_key(value: Any) -> str:
+    """列名宽松签名：忽略单位/标点，并统一常见业务同义词。"""
+    text = N.text(value).casefold()
+    text = re.sub(r"[（(][^）)]*[）)]", "", text)
+    replacements = {
+        "公里数": "里程", "公里": "里程", "km": "里程",
+        "时长": "时间", "分钟": "", "minute": "", "minutes": "",
+        "时间段": "时段", "名称": "名",
+    }
+    for old, new in replacements.items():
+        text = text.replace(old, new)
+    return re.sub(r"[^\w\u4e00-\u9fff\u0600-\u06ff]+", "", text)
+
+
+def _augment_header_map_by_names(rows: List[Dict[str, Any]],
+                                 columns: Optional[List[str]],
+                                 variants: Dict[str, Dict[str, str]],
+                                 mapping: Dict[str, str]) -> Dict[str, str]:
+    """近似列名唯一命中时补映射；候选接近时拒绝猜测。"""
+    if not rows or not columns:
+        return mapping
+    out = dict(mapping)
+    present = {LV.canonical_name(h, out) for h in rows[0]}
+    candidates = [c for c in columns if c not in present]
+    names = {
+        canonical: [canonical, *((variants or {}).get(canonical) or {}).values()]
+        for canonical in candidates
+    }
+    for raw_header in rows[0]:
+        if LV.canonical_name(raw_header, out) != raw_header:
+            continue
+        raw_key = _header_key(raw_header)
+        if not raw_key:
+            continue
+        scored = []
+        for canonical in candidates:
+            best = 0.0
+            for name in names[canonical]:
+                key = _header_key(name)
+                if not key:
+                    continue
+                score = SequenceMatcher(None, raw_key, key).ratio()
+                shorter, longer = sorted((len(raw_key), len(key)))
+                if shorter >= 3 and shorter / max(1, longer) >= 0.65 \
+                        and (raw_key in key or key in raw_key):
+                    score = max(score, 0.9)
+                best = max(best, score)
+            scored.append((best, canonical))
+        scored.sort(reverse=True)
+        if scored and scored[0][0] >= 0.74 \
+                and (len(scored) == 1 or scored[0][0] - scored[1][0] >= 0.12):
+            canonical = scored[0][1]
+            out[raw_header] = canonical
+            candidates.remove(canonical)
+    return out
 
 
 def _augment_header_map_by_values(rows: List[Dict[str, Any]],
@@ -460,6 +518,8 @@ def verify_export(ctx, compare_with=None, columns=None, row_count_mode="total",
     header_variants = getattr(ctx.config, "header_variants", {}) or {}
     canonical_of = _runtime_header_map(ctx, LV.reverse_map(header_variants))
     src = ctx.data.get(compare_with) if compare_with else None
+    canonical_of = _augment_header_map_by_names(
+        rows, list(columns or []), header_variants, canonical_of)
     canonical_of = _augment_header_map_by_values(
         rows, src, list(columns or []), canonical_of, sample=sample)
     comparison_rows = [

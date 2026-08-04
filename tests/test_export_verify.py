@@ -270,6 +270,35 @@ class ExportDetailAttachmentTests(unittest.TestCase):
 
         self.assertIn("抽样比对 4 个字段一致", msg)
 
+    def test_slightly_different_export_headers_are_matched_by_name(self):
+        mapping = EV._augment_header_map_by_names(
+            [{"起步时长": 10, "长途公里节点": 50, "高峰时间段": "08:00-09:00"}],
+            ["起步时长(分钟)", "长途里程节点", "高峰时段"],
+            {},
+            {},
+        )
+        self.assertEqual("起步时长(分钟)", mapping["起步时长"])
+        self.assertEqual("长途里程节点", mapping["长途公里节点"])
+        self.assertEqual("高峰时段", mapping["高峰时间段"])
+
+    def test_english_verb_tense_header_difference_is_matched(self):
+        mapping = EV._augment_header_map_by_names(
+            [{"Created Time": "2026-08-04 12:00:00"}],
+            ["Create Time"],
+            {"Create Time": {"en": "Create Time"}},
+            {},
+        )
+        self.assertEqual("Create Time", mapping["Created Time"])
+
+    def test_ambiguous_similar_headers_are_not_guessed(self):
+        mapping = EV._augment_header_map_by_names(
+            [{"起步时间": 10}],
+            ["起步等待时间", "起步服务时间"],
+            {},
+            {},
+        )
+        self.assertEqual({}, mapping)
+
     def test_value_mapping_refuses_ambiguous_columns(self):
         mapping = EV._augment_header_map_by_values(
             [{"Unknown": "相同"}],
