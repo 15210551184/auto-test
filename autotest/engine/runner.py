@@ -70,6 +70,14 @@ class Context:
         # 供报告里查"这条用例到底打了哪些接口、传了什么、返回了什么"。
         self.api_log: List[Dict[str, Any]] = []
         self._req_start: Dict[Any, float] = {}
+        # response 事件只代表“收到响应头”，响应体此时可能仍在下载。过去直接在
+        # response 回调里调用 resp.text()，会让 Playwright 的同步事件循环等待
+        # body；与此同时主流程可能正在 evaluate 表格，两边会互相等待，表现为
+        # capture 永远不返回、30 秒 locator timeout 也无法触发。
+        # 这里只暂存；requestfinished 也只记状态，等用例步骤退出事件回调后再
+        # 读取已经完整落地的 body。
+        self._pending_api_bodies: Dict[Any, tuple] = {}
+        self._finished_api_requests = set()
         # 批量执行的心跳从这里读取当前细分阶段。以前只能看到“某用例仍在
         # 执行”，无法判断是在打开页面、等接口、等下载还是读 Excel。
         self.current_phase = "初始化"
@@ -116,6 +124,7 @@ class Context:
                      if r.status >= 400 else None)
         self.page.on("request", lambda r: self._req_start.__setitem__(r, time.time()))
         self.page.on("response", self._on_api_response)
+        self.page.on("requestfinished", self._on_api_request_finished)
 
     def _on_request_failed(self, request):
         self.failed_requests.append(f"{request.method} {request.url[:120]}")
@@ -167,27 +176,45 @@ class Context:
                       for k, v in req.headers.items()}
         except Exception:
             headers = {}
-        try:
-            body = resp.text()
-            if len(body) > 3000:
-                body = body[:3000] + "…（已截断）"
-        except Exception:
-            body = None
         post_data = None
         try:
             if req.post_data:
                 post_data = req.post_data[:2000]
         except Exception:
             pass
-        self.api_log.append({
+        entry = {
             "method": req.method,
             "url": resp.url[:500],
             "status": resp.status,
             "duration_ms": duration_ms,
             "request_headers": headers,
             "request_body": post_data,
-            "response_body": body,
-        })
+            "response_body": None,
+        }
+        self.api_log.append(entry)
+        self._pending_api_bodies[req] = (entry, resp)
+
+    def _on_api_request_finished(self, request):
+        """事件回调只记状态，不在 Playwright 回调中再次调用同步 API。"""
+        if request in self._pending_api_bodies:
+            self._finished_api_requests.add(request)
+
+    def flush_api_bodies(self):
+        """步骤执行结束后，采集已经完整结束的 JSON 响应体。"""
+        for request in list(self._finished_api_requests):
+            pending = self._pending_api_bodies.pop(request, None)
+            self._finished_api_requests.discard(request)
+            if not pending:
+                continue
+            entry, resp = pending
+            try:
+                body = resp.text()
+                if len(body) > 3000:
+                    body = body[:3000] + "…（已截断）"
+                entry["response_body"] = body
+            except Exception:
+                # 响应体只是报告增强信息，读取失败不能影响用例本身。
+                pass
 
     def selector(self, key: str) -> str:
         """selectors 里的别名 -> CSS；不是别名就当原始选择器用"""
@@ -388,6 +415,8 @@ class Context:
         self.console_errors.clear()
         self.failed_requests.clear()
         self.api_log.clear()
+        self._pending_api_bodies.clear()
+        self._finished_api_requests.clear()
 
 
 # ---------- 配置加载 ----------
@@ -610,6 +639,8 @@ def run_case(ctx: Context, case: Case) -> CaseResult:
 
     if hasattr(ctx, "set_phase"):
         ctx.set_phase("用例收尾")
+    if hasattr(ctx, "flush_api_bodies"):
+        ctx.flush_api_bodies()
     return CaseResult(case.name, status, results, int((time.time() - t0) * 1000),
                       api_calls=list(ctx.api_log))
 

@@ -101,13 +101,32 @@ class ApiLogFilteringTests(unittest.TestCase):
         req = FakeRequest(method="POST", url="http://x.test/api/country/save",
                           post_data='{"name":"x"}')
         ctx.page.trigger("request", req)
-        ctx.page.trigger("response", FakeApiResponse(req, status=200, text='{"ok":true}'))
+        response = FakeApiResponse(req, status=200, text='{"ok":true}')
+        ctx.page.trigger("response", response)
+        self.assertIsNone(ctx.api_log[0]["response_body"])
+        ctx.page.trigger("requestfinished", req)
+        self.assertIsNone(ctx.api_log[0]["response_body"])
+        ctx.flush_api_bodies()
         entry = ctx.api_log[0]
         self.assertEqual("POST", entry["method"])
         self.assertEqual(200, entry["status"])
         self.assertEqual('{"name":"x"}', entry["request_body"])
         self.assertEqual('{"ok":true}', entry["response_body"])
         self.assertIsNotNone(entry["duration_ms"])
+
+    def test_response_body_is_not_read_until_request_finishes(self):
+        ctx = _make_ctx()
+        req = FakeRequest()
+        response = FakeApiResponse(req)
+        calls = []
+        response.text = lambda: calls.append("read") or '{"ok":true}'
+        ctx.page.trigger("request", req)
+        ctx.page.trigger("response", response)
+        self.assertEqual([], calls)
+        ctx.page.trigger("requestfinished", req)
+        self.assertEqual([], calls)
+        ctx.flush_api_bodies()
+        self.assertEqual(["read"], calls)
 
     def test_limit_caps_entries_per_case(self):
         ctx = _make_ctx()
