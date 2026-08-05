@@ -1324,7 +1324,12 @@ def to_config(report: Dict[str, Any], name: Optional[str] = None,
         if f["type"] != "date_range":
             continue
         label = f["label"]
-        col = next((h for h in headers if ctypes.get(h) == "date"), None)
+        # 一个页面可能同时有“创建时间”和“最后修改时间”。以前无论操作哪个
+        # 时间筛选框，都断言表格里遇到的第一列日期，导致“最后修改时间”筛选
+        # 反而拿“创建时间”判范围。必须按 label 绑定同名/可靠包含的列；对不
+        # 上时宁可只验证查询能执行，也不能随便挑另一列制造假失败。
+        matched = _match_column(label, headers)
+        col = matched if matched and ctypes.get(matched) == "date" else None
         steps = [{"date_range": {"label": label,
                                  "start": "${days_ago_7}", "end": "${today}"}},
                  {"search": None}]

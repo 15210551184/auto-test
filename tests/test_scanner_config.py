@@ -147,6 +147,31 @@ class ToConfigPhase1Tests(unittest.TestCase):
         active_blob = json.dumps(active, ensure_ascii=False)
         self.assertNotIn("TODO", active_blob)
 
+    def test_each_date_filter_asserts_its_matching_date_column(self):
+        self.report["form_fields"].extend([
+            {"label": "创建时间", "type": "date_range"},
+            {"label": "最后修改时间", "type": "date_range"},
+        ])
+        self.report["table"]["headers"].append("最后修改时间")
+        self.report["table"]["column_types"]["最后修改时间"] = "date"
+
+        cfg = scanner.to_config(self.report)
+
+        for label in ("创建时间", "最后修改时间"):
+            case = next(c for c in cfg["cases"] if c["name"] == f"时间筛选-{label}")
+            assertion = next(s["assert_column_range"] for s in case["steps"]
+                             if "assert_column_range" in s)
+            self.assertEqual(label, assertion["column"])
+
+    def test_unmatched_date_filter_does_not_assert_another_date_column(self):
+        self.report["form_fields"].append(
+            {"label": "审核时间", "type": "date_range"})
+
+        cfg = scanner.to_config(self.report)
+
+        case = next(c for c in cfg["cases"] if c["name"] == "时间筛选-审核时间")
+        self.assertNotIn("assert_column_range", [key for step in case["steps"] for key in step])
+
 
 class CascadingSelectConfigTests(unittest.TestCase):
     """
